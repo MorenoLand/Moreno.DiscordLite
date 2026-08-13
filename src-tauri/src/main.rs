@@ -30,6 +30,13 @@ async fn vc_toggle_maximize(window: tauri::WebviewWindow) {
 }
 #[tauri::command]
 async fn vc_hide(window: tauri::WebviewWindow) { window.hide().ok(); }
+fn show_main_window(window: &tauri::WebviewWindow) {
+    window.unminimize().ok();
+    window.show().ok();
+    window.set_always_on_top(true).ok();
+    window.set_focus().ok();
+    window.set_always_on_top(false).ok();
+}
 #[tauri::command]
 async fn vc_start_drag(window: tauri::WebviewWindow) { window.start_dragging().ok(); }
 #[tauri::command]
@@ -425,8 +432,7 @@ fn main() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("main") {
-                            win.show().ok();
-                            win.set_focus().ok();
+                            show_main_window(&win);
                         }
                     }
                     "hide" => {
@@ -449,8 +455,7 @@ fn main() {
                             if win.is_visible().unwrap_or(false) {
                                 win.hide().ok();
                             } else {
-                                win.show().ok();
-                                win.set_focus().ok();
+                                show_main_window(&win);
                             }
                         }
                     }
@@ -470,6 +475,7 @@ fn main() {
                 .min_inner_size(480.0, 400.0)
                 .center()
                 .user_agent(user_agent)
+                .devtools(true)
                 .disable_drag_drop_handler()
                 .enable_clipboard_access()
                 .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-extensions --disable-component-update --disable-background-networking --no-first-run --disable-default-apps --disable-sync --disable-translate --process-per-site --js-flags=--max-old-space-size=512 --disable-background-timer-throttling --disable-ipc-flooding-protection --disable-renderer-backgrounding --enable-low-res-tiling --num-raster-threads=2 --disable-threaded-animation --disable-backing-store-tiling --use-fake-ui-for-media-stream")
