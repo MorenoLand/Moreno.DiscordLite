@@ -88,6 +88,9 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 	case "vc_hide":
 		window.Hide()
 		d.respond(window, request.ID, nil, nil)
+	case "vc_open_devtools":
+		window.OpenDevTools()
+		d.respond(window, request.ID, nil, nil)
 	case "vc_start_drag":
 		window.HandleMessage("wails:drag")
 		d.respond(window, request.ID, nil, nil)
@@ -390,11 +393,24 @@ func bestDownloadFilename(rawURL string) string {
 func (d *discordApp) injectPage(window *application.WebviewWindow) {
 	vencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
 	vencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
-	encodedCSS, _ := json.Marshal(vencordCSS)
-	css := fmt.Sprintf("(function(){var s=document.getElementById('vencord-css');if(!s){s=document.createElement('style');s.id='vencord-css';document.head.appendChild(s)}s.textContent=%s})();", encodedCSS)
+	css := vencordCSSInjectionScript(vencordCSS)
 	for _, script := range []string{wailsBridgeJS, vencordJS, spoofJS, titlebarJS, downloadJS, css} {
 		window.ExecJS(script)
 	}
+}
+
+func vencordCSSInjectionScript(css string) string {
+	encodedCSS, _ := json.Marshal(css)
+	return fmt.Sprintf(`(function(){
+var css=%s;
+function apply(){
+if(!document.head){setTimeout(apply,50);return;}
+var s=document.getElementById('vencord-css');
+if(!s){s=document.createElement('style');s.id='vencord-css';document.head.appendChild(s);}
+if(s.textContent!==css)s.textContent=css;
+}
+apply();
+})();`, encodedCSS)
 }
 
 func main() {
@@ -437,7 +453,8 @@ func main() {
 	})
 	discord.app = app
 	initialVencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
-	initializationJS := strings.Join([]string{wailsBridgeJS, initialVencordJS, spoofJS, downloadJS}, "\n")
+	initialVencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
+	initializationJS := strings.Join([]string{wailsBridgeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",
 		Title:     "Discord",
@@ -492,6 +509,7 @@ var pending=Object.create(null),nextId=0;
 window.__vcWailsResponse=function(message){try{var response=typeof message==='string'?JSON.parse(message):message;var item=pending[response.id];if(!item)return;delete pending[response.id];if(response.ok)item.resolve(response.result);else item.reject(new Error(response.error||'Wails request failed'));}catch(e){}};
 function invoke(method,args){return new Promise(function(resolve,reject){var id=String(++nextId);pending[id]={resolve:resolve,reject:reject};try{window._wails.invoke(JSON.stringify({id:id,method:method,args:args||{}}));}catch(e){delete pending[id];reject(e);}});}
 window.__vcWails={invoke:invoke,shell:{open:function(url){return invoke('vc_open_url',{url:url});}}};
+document.addEventListener('keydown',function(e){if(e.key!=='F12'&&e.code!=='F12')return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();invoke('vc_open_devtools').catch(function(){});},true);
 })();`
 
 const spoofJS = `(function(){
@@ -507,13 +525,16 @@ XMLHttpRequest.prototype.setRequestHeader=function(name,value){if(name.toLowerCa
 })();`
 
 const titlebarJS = `(function(){
-if(window.__vcTbInit)return;window.__vcTbInit=1;
-var s=document.createElement('style');s.id='vc-tb-css';s.textContent='.vc-win-btn{width:46px!important;height:32px!important;border:none!important;background:none!important;color:var(--text-normal,#dbdee1)!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;transition:background .15s!important;}.vc-win-btn:hover{background:var(--background-modifier-hover,#35373c)!important;}.vc-win-btn.vc-close:hover{background:#ed4245!important;color:#fff!important;}[class*="winButton"]{display:none!important;}#vc-tb-btns{display:flex!important;height:100%!important;align-items:center!important;}[data-list-item-id="guildsnav___app-download-button"]{display:none!important;}[class*="bar_"][class*="c3"]{--wails-draggable:drag!important;}';document.head.appendChild(s);
+function start(){
+if(window.__vcTbInit)return;if(!document.documentElement||!document.head){setTimeout(start,50);return;}window.__vcTbInit=1;
+var s=document.createElement('style');s.id='vc-tb-css';s.textContent='.vc-win-btn{width:46px!important;height:32px!important;border:none!important;background:none!important;color:var(--interactive-normal,var(--text-normal,#dbdee1))!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;transition:background .15s!important;}.vc-win-btn:hover{background:var(--background-modifier-hover,#35373c)!important;}.vc-win-btn.vc-close:hover{background:#ed4245!important;color:#fff!important;}[class*="winButton"]{display:none!important;}#vc-tb-btns{display:flex!important;height:100%!important;align-items:center!important;flex:0 0 auto!important;margin-left:4px!important;position:relative!important;z-index:2!important;}[data-list-item-id="guildsnav___app-download-button"]{display:none!important;}[class*="bar_"][class*="c3"]{--wails-draggable:drag!important;}';document.head.appendChild(s);
 function iv(cmd,args){try{var t=window.__vcWails;if(t&&t.invoke){t.invoke(cmd,args).catch(function(){});return true;}}catch(e){}return false;}
-function inject(){var trailing=document.querySelector('[class*="trailing_"][class*="c3"]');if(!trailing||document.getElementById('vc-tb-btns'))return;var w=document.createElement('div');w.id='vc-tb-btns';trailing.appendChild(w);function mkBtn(id,cls,svg){var b=document.createElement('button');b.className='vc-win-btn'+(cls?' '+cls:'');b.id=id;b.innerHTML=svg;return b;}w.appendChild(mkBtn('vc-min','', '<svg width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg>'));w.appendChild(mkBtn('vc-max','', '<svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>'));w.appendChild(mkBtn('vc-close','vc-close','<svg width="10" height="10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2"/></svg>'));document.getElementById('vc-min').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_minimize');});document.getElementById('vc-max').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_toggle_maximize');});document.getElementById('vc-close').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_hide');});}
-inject();var ti=0,mo=new MutationObserver(function(){if(ti)return;ti=setTimeout(function(){ti=0;inject();},500);});function om(){if(document.body)mo.observe(document.body,{childList:true,subtree:true});else setTimeout(om,100);}om();
+function inject(){var trailing=document.querySelector('[data-window-chrome="true"] > [class*="trailing_"]');if(!trailing||document.getElementById('vc-tb-btns'))return;var w=document.createElement('div');w.id='vc-tb-btns';trailing.appendChild(w);function mkBtn(id,cls,svg){var b=document.createElement('button');b.className='vc-win-btn'+(cls?' '+cls:'');b.id=id;b.innerHTML=svg;return b;}w.appendChild(mkBtn('vc-min','', '<svg width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg>'));w.appendChild(mkBtn('vc-max','', '<svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>'));w.appendChild(mkBtn('vc-close','vc-close','<svg width="10" height="10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2"/></svg>'));document.getElementById('vc-min').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_minimize');});document.getElementById('vc-max').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_toggle_maximize');});document.getElementById('vc-close').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_hide');});}
+inject();var ti=0,mo=new MutationObserver(function(){if(ti)return;ti=setTimeout(function(){ti=0;inject();},250);});function om(){var root=document.documentElement;if(root)mo.observe(root,{childList:true,subtree:true});else setTimeout(om,100);}om();
 document.addEventListener('click',function(e){var a=e.target.closest('a[href]');if(a&&a.target==='_blank'){try{var u=new URL(a.href,location.origin);if(u.hostname!=='discord.com'&&u.hostname.indexOf('.discord.com')<0&&u.hostname.indexOf('.discordapp.com')<0){e.preventDefault();e.stopPropagation();window.__vcWails.shell.open(u.href);}}catch(ex){}}},true);
 document.addEventListener('mousedown',function(e){if(e.button!==0)return;if(e.target.closest('.vc-win-btn,.clickable,[role="button"],a,button,input,select,textarea,[contenteditable]'))return;if(e.target.closest('[class*="bar_"][class*="c3"]')){e.preventDefault();iv('vc_start_drag');}},true);
+}
+start();
 })();`
 
 const downloadJS = `(function(){
