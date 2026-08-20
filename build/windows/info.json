@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "file_version": "1.0.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "1.0.0",
+      "CompanyName": "Denveous",
+      "FileDescription": "Unofficial Discord desktop wrapper",
+      "LegalCopyright": "(c) 2025, Denveous",
+      "ProductName": "Discord",
+      "Comments": "Discord Wails desktop application"
+    }
+  }
+}

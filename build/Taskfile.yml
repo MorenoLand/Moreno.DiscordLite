@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  install:frontend:deps:
+    cmds:
+      - pnpm install --frozen-lockfile
+  build:frontend:
+    deps:
+      - task: install:frontend:deps
+    cmds:
+      - pnpm --dir frontend run build
+  dev:frontend:
+    cmds:
+      - pnpm --dir frontend run dev -- --host 127.0.0.1 --port {{.VITE_PORT}}
+  go:mod:tidy:
+    cmds:
+      - go mod tidy

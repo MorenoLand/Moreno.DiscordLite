@@ -1,0 +1,28 @@
+version: '3'
+
+vars:
+  APP_NAME: discord
+  BIN_DIR: bin
+  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "pnpm"}}'
+  VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+  GOOS: '{{.GOOS | default OS}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+
+tasks:
+  build:
+    cmds:
+      - task: '{{.GOOS}}:build'
+  package:
+    cmds:
+      - task: '{{.GOOS}}:package'
+  run:
+    cmds:
+      - task: '{{.GOOS}}:run'
+  dev:
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}

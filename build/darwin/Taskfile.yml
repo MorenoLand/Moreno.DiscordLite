@@ -1,0 +1,20 @@
+version: '3'
+
+includes:
+  common: ../Taskfile.yml
+
+tasks:
+  build:
+    deps:
+      - task: common:go:mod:tidy
+      - task: common:build:frontend
+    cmds:
+      - go build -tags production -trimpath -buildvcs=false -ldflags="-w -s" -o {{.BIN_DIR}}/{{.APP_NAME}}
+    env:
+      GOOS: darwin
+  package:
+    cmds:
+      - task: build
+  run:
+    cmds:
+      - '{{.BIN_DIR}}/{{.APP_NAME}}'

@@ -1,17 +1,11 @@
 {
-  "name": "discord-tauri",
+  "name": "discord-wails",
   "version": "1.0.0",
   "packageManager": "pnpm@10.13.1",
-  "private": false,
+  "private": true,
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2"
-  },
-  "dependencies": {
-    "@tauri-apps/plugin-shell": "^2.3.5"
+    "wails": "wails3",
+    "dev": "wails3 dev -config ./build/config.yml -port 9245",
+    "build": "wails3 task package"
   }
 }

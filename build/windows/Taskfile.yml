@@ -1,0 +1,34 @@
+version: '3'
+
+includes:
+  common: ../Taskfile.yml
+
+tasks:
+  build:
+    deps:
+      - task: common:go:mod:tidy
+      - task: common:build:frontend
+    cmds:
+      - task: generate:syso
+      - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/{{.APP_NAME}}.exe
+      - powershell -NoProfile -Command "Remove-Item -LiteralPath '*.syso' -Force -ErrorAction SilentlyContinue"
+      - upx --best --lzma --force {{.BIN_DIR}}/{{.APP_NAME}}.exe
+    vars:
+      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
+    env:
+      GOOS: windows
+      CGO_ENABLED: '0'
+      GOARCH: '{{.ARCH | default ARCH}}'
+      PRODUCTION: '{{.PRODUCTION | default "true"}}'
+  package:
+    cmds:
+      - task: build
+        vars:
+          PRODUCTION: 'true'
+  generate:syso:
+    dir: build
+    cmds:
+      - wails3 generate syso -arch {{.ARCH | default ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../wails_windows_{{.ARCH | default ARCH}}.syso
+  run:
+    cmds:
+      - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'

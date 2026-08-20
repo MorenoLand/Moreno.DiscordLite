@@ -1,8 +1,11 @@
 node_modules/
+frontend/node_modules/
 target/
-src-tauri/target/
+bin/
+frontend/dist/
 *.pdb
 *.exe
 *.dmp
-dist/
 *.bak
+*.syso
+vencord/.last_update
