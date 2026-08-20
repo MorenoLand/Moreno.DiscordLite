@@ -392,7 +392,7 @@ func (d *discordApp) injectPage(window *application.WebviewWindow) {
 	vencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
 	encodedCSS, _ := json.Marshal(vencordCSS)
 	css := fmt.Sprintf("(function(){var s=document.getElementById('vencord-css');if(!s){s=document.createElement('style');s.id='vencord-css';document.head.appendChild(s)}s.textContent=%s})();", encodedCSS)
-	window.ExecJS(strings.Join([]string{wailsBridgeJS, vencordJS, spoofJS, titlebarJS, downloadJS, css}, "\n"))
+	window.ExecJS(strings.Join([]string{wailsBridgeJS, vencordJS, spoofJS, titlebarJS, fallbackTitlebarJS, downloadJS, css}, "\n"))
 }
 
 func main() {
@@ -435,7 +435,7 @@ func main() {
 	})
 	discord.app = app
 	initialVencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
-	initializationJS := strings.Join([]string{wailsBridgeJS, initialVencordJS, spoofJS, downloadJS}, "\n")
+	initializationJS := strings.Join([]string{wailsBridgeJS, initialVencordJS, spoofJS, fallbackTitlebarJS, downloadJS}, "\n")
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",
 		Title:     "Discord",
@@ -512,6 +512,13 @@ function inject(){var trailing=document.querySelector('[class*="trailing_"][clas
 inject();var ti=0,mo=new MutationObserver(function(){if(ti)return;ti=setTimeout(function(){ti=0;inject();},500);});function om(){if(document.body)mo.observe(document.body,{childList:true,subtree:true});else setTimeout(om,100);}om();
 document.addEventListener('click',function(e){var a=e.target.closest('a[href]');if(a&&a.target==='_blank'){try{var u=new URL(a.href,location.origin);if(u.hostname!=='discord.com'&&u.hostname.indexOf('.discord.com')<0&&u.hostname.indexOf('.discordapp.com')<0){e.preventDefault();e.stopPropagation();window.__vcWails.shell.open(u.href);}}catch(ex){}}},true);
 document.addEventListener('mousedown',function(e){if(e.button!==0)return;if(e.target.closest('.vc-win-btn,.clickable,[role="button"],a,button,input,select,textarea,[contenteditable]'))return;if(e.target.closest('[class*="bar_"][class*="c3"]')){e.preventDefault();iv('vc_start_drag');}},true);
+})();`
+
+const fallbackTitlebarJS = `(function(){
+function call(command){try{if(window.__vcWails&&window.__vcWails.invoke)window.__vcWails.invoke(command).catch(function(){});}catch(e){}}
+function install(){if(document.getElementById('vc-wails-tb')||(document.getElementById('vc-min')&&document.getElementById('vc-max')&&document.getElementById('vc-close'))||!document.body||!document.head)return;var style=document.createElement('style');style.textContent='.vc-tb-overlay{position:fixed!important;top:0!important;right:0!important;z-index:2147483647!important;display:flex!important;height:32px!important;pointer-events:none!important;}.vc-tb-overlay .vc-win-btn{pointer-events:auto!important;width:46px!important;height:32px!important;border:0!important;background:#313338!important;color:#dbdee1!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;}.vc-tb-overlay .vc-win-btn:hover{background:#35373c!important;}.vc-tb-overlay .vc-win-btn.vc-close:hover{background:#ed4245!important;color:#fff!important;}';document.head.appendChild(style);var w=document.createElement('div');w.id='vc-wails-tb';w.className='vc-tb-overlay';w.innerHTML='<button class="vc-win-btn" id="vc-wails-min" title="Minimize"><svg width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg></button><button class="vc-win-btn" id="vc-wails-max" title="Maximize"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg></button><button class="vc-win-btn vc-close" id="vc-wails-close" title="Close"><svg width="10" height="10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2"/></svg></button>';document.body.appendChild(w);document.getElementById('vc-wails-min').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();call('vc_minimize');});document.getElementById('vc-wails-max').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();call('vc_toggle_maximize');});document.getElementById('vc-wails-close').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();call('vc_hide');});}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
 })();`
 
 const downloadJS = `(function(){
