@@ -50,6 +50,10 @@ type bridgeDownloadArgs struct {
 	Filename string `json:"filename"`
 }
 
+type bridgeResizeArgs struct {
+	Edge string `json:"edge"`
+}
+
 type bridgeURLArgs struct {
 	URL string `json:"url"`
 }
@@ -94,6 +98,14 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 	case "vc_start_drag":
 		window.HandleMessage("wails:drag")
 		d.respond(window, request.ID, nil, nil)
+	case "vc_start_resize":
+		var args bridgeResizeArgs
+		if err := json.Unmarshal(request.Args, &args); err != nil || !validResizeEdge(args.Edge) {
+			d.respond(window, request.ID, nil, fmt.Errorf("invalid resize edge"))
+			return
+		}
+		window.HandleMessage("wails:resize:" + args.Edge)
+		d.respond(window, request.ID, nil, nil)
 	case "vc_open_url":
 		var args bridgeURLArgs
 		if err := json.Unmarshal(request.Args, &args); err != nil || args.URL == "" {
@@ -129,6 +141,15 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			err := d.download(window, args.URL, args.Filename)
 			d.respond(window, request.ID, nil, err)
 		}()
+	}
+}
+
+func validResizeEdge(edge string) bool {
+	switch edge {
+	case "nw-resize", "n-resize", "ne-resize", "w-resize", "e-resize", "sw-resize", "s-resize", "se-resize":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -205,6 +226,7 @@ func openURL(rawURL string) error {
 	default:
 		command = exec.Command("xdg-open", rawURL)
 	}
+	hideCommandWindow(command)
 	return command.Start()
 }
 
@@ -390,11 +412,17 @@ func bestDownloadFilename(rawURL string) string {
 	return fallback
 }
 
+const imageSaveJS = `(function(){
+if(window.__vcImageSaveInit)return;window.__vcImageSaveInit=1;
+function originalImageURL(raw){var u;try{u=new URL(raw,location.href);}catch(ex){return null;}var host=u.hostname.toLowerCase();if(u.protocol!=='https:'||(host!=='cdn.discordapp.com'&&host!=='media.discordapp.net')||!/^\/(?:attachments|ephemeral-attachments|avatars|icons|banners|emojis|app-assets)\//i.test(u.pathname))return null;['format','quality','width','height','size'].forEach(function(key){u.searchParams.delete(key);});if(host==='media.discordapp.net'&&/^\/(?:attachments|ephemeral-attachments)\//i.test(u.pathname))u.hostname='cdn.discordapp.com';return u.href===raw?null:u.href;}
+document.addEventListener('contextmenu',function(e){var img=e.target&&e.target.closest?e.target.closest('img'):null;if(!img)return;var raw=img.currentSrc||img.src;if(!raw)return;var original=originalImageURL(raw);if(!original)return;img.removeAttribute('srcset');img.src=original;},true);
+})();`
+
 func (d *discordApp) injectPage(window *application.WebviewWindow) {
 	vencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
 	vencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
 	css := vencordCSSInjectionScript(vencordCSS)
-	for _, script := range []string{wailsBridgeJS, vencordJS, spoofJS, titlebarJS, downloadJS, css} {
+	for _, script := range []string{wailsBridgeJS, resizeJS, vencordJS, spoofJS, titlebarJS, downloadJS, imageSaveJS, css} {
 		window.ExecJS(script)
 	}
 }
@@ -454,17 +482,18 @@ func main() {
 	discord.app = app
 	initialVencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
 	initialVencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
-	initializationJS := strings.Join([]string{wailsBridgeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
+	initializationJS := strings.Join([]string{wailsBridgeJS, resizeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, imageSaveJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:      "main",
-		Title:     "Discord",
-		HTML:      "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script>location.replace(\"https://discord.com/app\")</script></body></html>",
-		JS:        initializationJS,
-		Width:     1280,
-		Height:    860,
-		MinWidth:  480,
-		MinHeight: 400,
-		Frameless: true,
+		Name:          "main",
+		Title:         "Discord",
+		HTML:          "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script>location.replace(\"https://discord.com/app\")</script></body></html>",
+		JS:            initializationJS,
+		Width:         1280,
+		Height:        860,
+		MinWidth:      480,
+		MinHeight:     400,
+		Frameless:     true,
+		DisableResize: false,
 		Permissions: map[application.PermissionType]application.Permission{
 			application.PermissionCamera:        application.PermissionAllow,
 			application.PermissionMicrophone:    application.PermissionAllow,
@@ -512,6 +541,17 @@ window.__vcWails={invoke:invoke,shell:{open:function(url){return invoke('vc_open
 document.addEventListener('keydown',function(e){if(e.key!=='F12'&&e.code!=='F12')return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();invoke('vc_open_devtools').catch(function(){});},true);
 })();`
 
+const resizeJS = `(function(){
+if(window.__vcResizeInit)return;window.__vcResizeInit=1;
+var active='',hover='',savedCursor='';
+function edgeAt(e){var x=e.clientX,y=e.clientY,w=window.innerWidth,h=window.innerHeight,d=8,l=x<=d,r=x>=w-d,t=y<=d,b=y>=h-d;if(t&&l)return'nw-resize';if(t&&r)return'ne-resize';if(b&&l)return'sw-resize';if(b&&r)return'se-resize';if(t)return'n-resize';if(b)return's-resize';if(l)return'w-resize';if(r)return'e-resize';return'';}
+function setHover(edge){if(edge===hover)return;if(!hover&&edge)savedCursor=document.documentElement.style.cursor;hover=edge;document.documentElement.style.cursor=edge||savedCursor;if(!edge)savedCursor='';}
+function clear(){active='';setHover('');}
+document.addEventListener('mousemove',function(e){if(active)return;setHover(edgeAt(e));},true);
+document.addEventListener('mousedown',function(e){if(e.button!==0||active)return;var edge=edgeAt(e);if(!edge)return;active=edge;setHover(edge);e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();window.__vcWails.invoke('vc_start_resize',{edge:edge}).catch(function(){});},true);
+document.addEventListener('mouseup',clear,true);window.addEventListener('blur',clear,true);
+})();`
+
 const spoofJS = `(function(){
 function patchSp(sp){try{var o=JSON.parse(atob(sp));if(o.browser==='chrome'){o.browser='discord';o.browser_version='';}return btoa(JSON.stringify(o));}catch(e){return sp;}}
 var origFetch=window.fetch;
@@ -539,5 +579,5 @@ start();
 
 const downloadJS = `(function(){
 if(window.__vcDownloadInit)return;window.__vcDownloadInit=1;
-document.addEventListener('click',function(e){var a=e.target.closest('a[href]');if(!a)return;var u;try{u=new URL(a.href,location.origin);}catch(ex){return;}var isAttachment=a.hasAttribute('download')||u.pathname.indexOf('/attachments/')>=0||u.pathname.indexOf('/ephemeral-attachments/')>=0;if(!isAttachment)return;e.preventDefault();e.stopPropagation();window.__vcWails.invoke('vc_download',{url:u.href,filename:a.getAttribute('download')||''}).catch(function(){});},true);
+document.addEventListener('click',function(e){var a=e.target.closest('a[href]');if(!a)return;var u;try{u=new URL(a.href,location.origin);}catch(ex){return;}var target=e.target.closest?e.target:null;var isDownload=a.hasAttribute('download')||/download/i.test(a.getAttribute('aria-label')||'')||!!(target&&target.closest('[aria-label="Download"],[data-tooltip-content="Download"]'));if(!isDownload)return;e.preventDefault();e.stopPropagation();window.__vcWails.invoke('vc_download',{url:u.href,filename:a.getAttribute('download')||''}).catch(function(){});},true);
 })();`

@@ -14,7 +14,7 @@ tasks:
       - powershell -NoProfile -Command "Remove-Item -LiteralPath '*.syso' -Force -ErrorAction SilentlyContinue"
       - upx --best --lzma --force {{.BIN_DIR}}/{{.APP_NAME}}.exe
     vars:
-      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags "production devtools" -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
+      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags "production devtools" -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{else}}-buildvcs=false -gcflags=all="-l" -ldflags="-H windowsgui"{{end}}'
     env:
       GOOS: windows
       CGO_ENABLED: '0'
