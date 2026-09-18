@@ -329,6 +329,7 @@ func gameDisplayName(value string) string {
 }
 
 func (d *discordApp) gameActivityState() (gameActivityState, error) {
+	refreshGameActivityProcesses()
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err := loadGameActivityConfig()

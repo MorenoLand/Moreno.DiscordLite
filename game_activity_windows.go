@@ -176,12 +176,11 @@ func visibleWindowTitles() map[uint32]string {
 	enumWindowsMu.Lock()
 	defer enumWindowsMu.Unlock()
 	currentEnumTitles = map[uint32]string{}
+	enumWindows.Call(enumWindowsCallback, 0)
 	inputDesk, _, _ := openInputDesktop.Call(0, 0, 0x0040)
 	if inputDesk != 0 {
 		enumDesktopWindows.Call(inputDesk, enumWindowsCallback, 0)
 		closeDesktop.Call(inputDesk)
-	} else {
-		enumWindows.Call(enumWindowsCallback, 0)
 	}
 	titles := currentEnumTitles
 	currentEnumTitles = nil
