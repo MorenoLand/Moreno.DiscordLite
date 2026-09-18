@@ -439,12 +439,13 @@ return null;
 });
 return detectablePromise;
 }
-var activePresenceKey=null,pendingPresenceData=null,lastAppliedData=null;
+var activePresenceKey=null,pendingPresenceData=null,lastAppliedData=null,presenceCleared=false;
 var pendingRPCActivities={};
 function hookDispatcher(d){
 if(!d||d.__vcPresenceHooked)return;
 d.__vcPresenceHooked=true;
 function onOpen(){
+presenceCleared=false;
 activePresenceKey=null;
 if(lastAppliedData)updateDetectedGamePresence(lastAppliedData);
 }
@@ -466,12 +467,16 @@ hookDispatcher(dispatcher);
 var running=(data.detectionEnabled&&data.runningGames)||[];
 var activeGames=running.filter(function(g){return !isGameDisabled(data.disabledGames,g.path);});
 if(!activeGames.length){
-if(activePresenceKey!==null){
+if(activePresenceKey!==null||!presenceCleared){
 activePresenceKey=null;
+presenceCleared=true;
 queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null});
+queueDispatch(dispatcher,{type:'RPC_APP_DISCONNECTED',socketId:'GameActivity'});
+queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',activity:null});
 }
 return;
 }
+presenceCleared=false;
 var primary=activeGames[0];
 var exeName=primary.path?primary.path.replace(/^.*[\\\/]/,'').toLowerCase():'';
 var known=KNOWN_GAMES[exeName];
@@ -520,6 +525,10 @@ queueDispatch(dispatcher,{
 type:'LOCAL_ACTIVITY_UPDATE',
 socketId:socketId,
 activity:null
+});
+queueDispatch(dispatcher,{
+type:'RPC_APP_DISCONNECTED',
+socketId:socketId
 });
 }
 }

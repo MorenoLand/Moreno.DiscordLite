@@ -200,7 +200,7 @@ func (d *discordApp) startGameActivityObserver() {
 					d.window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
 				}
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 	}()
 }
