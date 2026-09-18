@@ -58,10 +58,16 @@ var gameActivityMu sync.Mutex
 var gameActivityRuntimeMu sync.RWMutex
 var gameActivityRunning []gameProcess
 
-func startGameActivityObserver() {
+func (d *discordApp) startGameActivityObserver() {
 	go func() {
 		for {
 			refreshGameActivityProcesses()
+			if d.window != nil {
+				if state, err := d.gameActivityState(); err == nil {
+					encoded, _ := json.Marshal(state)
+					d.window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+				}
+			}
 			time.Sleep(5 * time.Second)
 		}
 	}()
@@ -79,48 +85,62 @@ func setCachedGameActivityProcesses(processes []gameProcess) {
 	gameActivityRuntimeMu.Unlock()
 }
 
-func refreshGameActivityProcesses() {
+func refreshGameActivityProcesses() []gameProcess {
 	gameActivityMu.Lock()
 	config, err := loadGameActivityConfig()
 	gameActivityMu.Unlock()
 	if err != nil {
-		return
+		return nil
 	}
 	if !config.DetectionEnabled {
 		setCachedGameActivityProcesses(nil)
-		return
+		return nil
 	}
 	candidates := make([]string, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
-		candidates = append(candidates, entry.Path)
+		if entry.Source == "manual" || config.Overrides[normalizeGamePath(entry.Path)] != "" || likelyGamePath(entry.Path) {
+			candidates = append(candidates, entry.Path)
+		}
 	}
 	running, err := enumerateGameProcesses(candidates...)
 	if err != nil {
-		return
+		return nil
 	}
 	setCachedGameActivityProcesses(running)
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err = loadGameActivityConfig()
 	if err != nil || !config.DetectionEnabled {
-		return
+		return running
 	}
 	changed := false
 	for _, process := range running {
 		id := normalizeGamePath(process.Path)
-		if id == "" || containsGameEntry(config.GamesSeen, id) {
+		if id == "" {
 			continue
 		}
-		name := process.Name
-		if override := config.Overrides[id]; override != "" {
-			name = override
+		found := false
+		for i := range config.GamesSeen {
+			if normalizeGamePath(config.GamesSeen[i].Path) == id {
+				found = true
+				config.GamesSeen[i].LastSeen = time.Now()
+				changed = true
+				break
+			}
 		}
-		config.GamesSeen = append(config.GamesSeen, gameActivityEntry{ID: id, Name: name, Path: process.Path, Source: "detected", LastSeen: time.Now()})
-		changed = true
+		if !found {
+			name := process.Name
+			if override := config.Overrides[id]; override != "" {
+				name = override
+			}
+			config.GamesSeen = append(config.GamesSeen, gameActivityEntry{ID: id, Name: name, Path: process.Path, Source: "detected", LastSeen: time.Now()})
+			changed = true
+		}
 	}
 	if changed {
 		_ = saveGameActivityConfig(config)
 	}
+	return running
 }
 
 func gameActivityPath() (string, error) {
@@ -186,6 +206,7 @@ func gameDisplayName(value string) string {
 }
 
 func (d *discordApp) gameActivityState() (gameActivityState, error) {
+	refreshGameActivityProcesses()
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err := loadGameActivityConfig()
@@ -197,23 +218,10 @@ func (d *discordApp) gameActivityState() (gameActivityState, error) {
 		running = cachedGameActivityProcesses()
 	}
 	config.GamesSeen = deduplicateGameEntries(config.GamesSeen, config.Overrides)
-	changed := false
 	for i := range running {
 		id := normalizeGamePath(running[i].Path)
-		if id == "" {
-			continue
-		}
 		if override := config.Overrides[id]; override != "" {
 			running[i].Name = override
-		}
-		if !containsGameEntry(config.GamesSeen, id) {
-			config.GamesSeen = append(config.GamesSeen, gameActivityEntry{ID: id, Name: running[i].Name, Path: running[i].Path, Source: "detected", LastSeen: time.Now()})
-			changed = true
-		}
-	}
-	if changed {
-		if err := saveGameActivityConfig(config); err != nil {
-			return gameActivityState{}, err
 		}
 	}
 	sort.Slice(config.GamesSeen, func(i, j int) bool {
@@ -283,10 +291,23 @@ func (d *discordApp) addGameActivity(window application.Window, args bridgeGameA
 		name = gameDisplayName(pathName)
 	}
 	config.Overrides[id] = name
-	config.GamesSeen = deduplicateGameEntries(append(config.GamesSeen, gameActivityEntry{ID: id, Name: name, Path: pathName, Source: "manual", LastSeen: time.Now()}), config.Overrides)
+	newEntry := gameActivityEntry{ID: id, Name: name, Path: pathName, Source: "manual", LastSeen: time.Now()}
+	updated := false
+	for i := range config.GamesSeen {
+		if normalizeGamePath(config.GamesSeen[i].Path) == id {
+			config.GamesSeen[i] = newEntry
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		config.GamesSeen = append(config.GamesSeen, newEntry)
+	}
+	config.GamesSeen = deduplicateGameEntries(config.GamesSeen, config.Overrides)
 	if err := saveGameActivityConfig(config); err != nil {
 		return gameActivityState{}, err
 	}
+	refreshGameActivityProcesses()
 	return d.gameActivityStateUnlocked(config)
 }
 

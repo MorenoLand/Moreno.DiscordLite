@@ -28,6 +28,9 @@ var (
 	queryFullProcessImageName = kernel32.NewProc("QueryFullProcessImageNameW")
 	closeHandle               = kernel32.NewProc("CloseHandle")
 	enumWindows               = user32.NewProc("EnumWindows")
+	openInputDesktop          = user32.NewProc("OpenInputDesktop")
+	enumDesktopWindows        = user32.NewProc("EnumDesktopWindows")
+	closeDesktop              = user32.NewProc("CloseDesktop")
 	isWindowVisible           = user32.NewProc("IsWindowVisible")
 	getWindowThreadProcessID  = user32.NewProc("GetWindowThreadProcessId")
 	getWindowTextLength       = user32.NewProc("GetWindowTextLengthW")
@@ -59,21 +62,35 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 	}
 	defer closeHandle.Call(snapshot)
 	entry := processEntry32{Size: uint32(unsafe.Sizeof(processEntry32{}))}
-	result := []gameProcess{}
+	byPath := map[string]gameProcess{}
 	currentPID := uint32(os.Getpid())
 	first, _, _ := process32First.Call(snapshot, uintptr(unsafe.Pointer(&entry)))
 	for first != 0 {
 		pid := entry.ProcessID
 		pathName := processPath(pid)
 		name := filepath.Base(pathName)
-		if pid != 0 && pid != currentPID && pathName != "" && !ignoredGameProcess(name) {
+		normPath := normalizeGamePath(pathName)
+		if pid != 0 && pid != currentPID && normPath != "" && !ignoredGameProcess(name) {
 			title := windows[pid]
-			if title != "" || candidates[normalizeGamePath(pathName)] || likelyGamePath(pathName) {
-				result = append(result, gameProcess{PID: pid, Name: gameDisplayName(name), Path: pathName, WindowTitle: title})
+			isCandidate := candidates[normPath]
+			isLikely := likelyGamePath(pathName)
+			if isCandidate || (isLikely && title != "") {
+				display := gameDisplayName(name)
+				if title != "" && !isCandidate {
+					display = title
+				}
+				existing, exists := byPath[normPath]
+				if !exists || (existing.WindowTitle == "" && title != "") {
+					byPath[normPath] = gameProcess{PID: pid, Name: display, Path: pathName, WindowTitle: title}
+				}
 			}
 		}
 		entry = processEntry32{Size: uint32(unsafe.Sizeof(processEntry32{}))}
 		first, _, _ = process32Next.Call(snapshot, uintptr(unsafe.Pointer(&entry)))
+	}
+	result := make([]gameProcess, 0, len(byPath))
+	for _, p := range byPath {
+		result = append(result, p)
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name) })
 	return result, nil
@@ -127,7 +144,9 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 	buffer := make([]uint16, length+1)
 	getWindowText.Call(hwnd, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)))
 	if title := strings.TrimSpace(syscall.UTF16ToString(buffer)); title != "" {
-		currentEnumTitles[pid] = title
+		if currentEnumTitles[pid] == "" || len(title) > len(currentEnumTitles[pid]) {
+			currentEnumTitles[pid] = title
+		}
 	}
 	return 1
 }
@@ -136,7 +155,13 @@ func visibleWindowTitles() map[uint32]string {
 	enumWindowsMu.Lock()
 	defer enumWindowsMu.Unlock()
 	currentEnumTitles = map[uint32]string{}
-	enumWindows.Call(enumWindowsCallback, 0)
+	inputDesk, _, _ := openInputDesktop.Call(0, 0, 0x0040)
+	if inputDesk != 0 {
+		enumDesktopWindows.Call(inputDesk, enumWindowsCallback, 0)
+		closeDesktop.Call(inputDesk)
+	} else {
+		enumWindows.Call(enumWindowsCallback, 0)
+	}
 	titles := currentEnumTitles
 	currentEnumTitles = nil
 	return titles

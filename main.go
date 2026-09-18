@@ -501,7 +501,7 @@ func main() {
 	checkAndUpdateVencord()
 	startDiscordRPCBridge()
 	discord := &discordApp{recentDownload: make(map[string]time.Time)}
-	startGameActivityObserver()
+	discord.startGameActivityObserver()
 	app := application.New(application.Options{
 		Name:        "Discord",
 		Description: "Unofficial Discord desktop wrapper",
