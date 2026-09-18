@@ -76,6 +76,14 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 			isCandidate := candidates[normPath]
 			isLikely := likelyGamePath(pathName)
 			known, isKnown := resolveKnownGame(name)
+			if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {
+				if strings.Contains(strings.ToLower(title), "minecraft") || strings.Contains(strings.ToLower(pathName), `\.minecraft\`) {
+					known = knownGame{ApplicationID: "356875127150903296", Name: "Minecraft"}
+					isKnown = true
+				} else {
+					isKnown = false
+				}
+			}
 			if isCandidate || isKnown || (isLikely && title != "") {
 				display := gameDisplayName(name)
 				if isKnown && known.Name != "" {

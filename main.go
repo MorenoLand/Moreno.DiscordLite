@@ -169,6 +169,10 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			return
 		}
 		value, err := d.removeGameActivity(args.Path)
+		if err == nil {
+			encoded, _ := json.Marshal(value)
+			window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+		}
 		d.respond(window, request.ID, value, err)
 	case "vc_game_activity_set_detection":
 		var args bridgeGameActivityDetectionArgs
@@ -177,6 +181,22 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			return
 		}
 		value, err := d.setGameActivityDetection(args.Enabled)
+		if err == nil {
+			encoded, _ := json.Marshal(value)
+			window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+		}
+		d.respond(window, request.ID, value, err)
+	case "vc_game_activity_toggle_game":
+		var args bridgeGameActivityToggleGameArgs
+		if err := json.Unmarshal(request.Args, &args); err != nil || args.Path == "" {
+			d.respond(window, request.ID, nil, fmt.Errorf("invalid game activity toggle arguments"))
+			return
+		}
+		value, err := d.toggleGameActivity(args.Path, args.Enabled)
+		if err == nil {
+			encoded, _ := json.Marshal(value)
+			window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+		}
 		d.respond(window, request.ID, value, err)
 	}
 }

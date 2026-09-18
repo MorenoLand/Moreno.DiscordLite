@@ -42,7 +42,6 @@ var defaultKnownGames = map[string]knownGame{
 	"dota2.exe":                         {ApplicationID: "738864293411684352", Name: "Dota 2"},
 	"gta5.exe":                          {ApplicationID: "436993026818867200", Name: "Grand Theft Auto V"},
 	"minecraft.exe":                     {ApplicationID: "356875127150903296", Name: "Minecraft"},
-	"javaw.exe":                         {ApplicationID: "356875127150903296", Name: "Minecraft"},
 	"rocketleague.exe":                  {ApplicationID: "356877028164632576", Name: "Rocket League"},
 	"fortniteclient-win64-shipping.exe": {ApplicationID: "432980957394370572", Name: "Fortnite"},
 	"genshinimpact.exe":                 {ApplicationID: "762434991303950386", Name: "Genshin Impact"},
@@ -158,6 +157,7 @@ type gameActivityConfig struct {
 	DetectionEnabled bool                `json:"detectionEnabled"`
 	GamesSeen        []gameActivityEntry `json:"gamesSeen"`
 	Overrides        map[string]string   `json:"overrides"`
+	DisabledGames    map[string]bool     `json:"disabledGames"`
 }
 
 type gameActivityState struct {
@@ -165,6 +165,7 @@ type gameActivityState struct {
 	RunningGames     []gameProcess       `json:"runningGames"`
 	GamesSeen        []gameActivityEntry `json:"gamesSeen"`
 	Overrides        map[string]string   `json:"overrides"`
+	DisabledGames    map[string]bool     `json:"disabledGames"`
 }
 
 type bridgeGameActivityAddArgs struct {
@@ -178,6 +179,11 @@ type bridgeGameActivityPathArgs struct {
 
 type bridgeGameActivityDetectionArgs struct {
 	Enabled bool `json:"enabled"`
+}
+
+type bridgeGameActivityToggleGameArgs struct {
+	Path    string `json:"path"`
+	Enabled bool   `json:"enabled"`
 }
 
 var gameActivityMu sync.Mutex
@@ -300,6 +306,9 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 	if config.Overrides == nil {
 		config.Overrides = map[string]string{}
 	}
+	if config.DisabledGames == nil {
+		config.DisabledGames = map[string]bool{}
+	}
 	needsSave := false
 	for k, v := range config.Overrides {
 		if strings.ContainsAny(v, `\/`) {
@@ -307,12 +316,20 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 			needsSave = true
 		}
 	}
-	for i := range config.GamesSeen {
-		if strings.ContainsAny(config.GamesSeen[i].Name, `\/`) {
-			config.GamesSeen[i].Name = gameDisplayName(config.GamesSeen[i].Name)
+	filteredSeen := make([]gameActivityEntry, 0, len(config.GamesSeen))
+	for _, entry := range config.GamesSeen {
+		exe := strings.ToLower(filepath.Base(entry.Path))
+		if (exe == "javaw.exe" || exe == "java.exe") && entry.Name == "Minecraft" && entry.Source == "detected" {
+			needsSave = true
+			continue
+		}
+		if strings.ContainsAny(entry.Name, `\/`) {
+			entry.Name = gameDisplayName(entry.Name)
 			needsSave = true
 		}
+		filteredSeen = append(filteredSeen, entry)
 	}
+	config.GamesSeen = filteredSeen
 	if needsSave {
 		_ = saveGameActivityConfig(config)
 	}
@@ -470,6 +487,7 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 	}
 	id := normalizeGamePath(pathName)
 	delete(config.Overrides, id)
+	delete(config.DisabledGames, id)
 	filtered := make([]gameActivityEntry, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
 		if normalizeGamePath(entry.Path) != id {
@@ -477,6 +495,28 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 		}
 	}
 	config.GamesSeen = filtered
+	if err := saveGameActivityConfig(config); err != nil {
+		return gameActivityState{}, err
+	}
+	return d.gameActivityStateUnlocked(config)
+}
+
+func (d *discordApp) toggleGameActivity(pathName string, enabled bool) (gameActivityState, error) {
+	gameActivityMu.Lock()
+	defer gameActivityMu.Unlock()
+	config, err := loadGameActivityConfig()
+	if err != nil {
+		return gameActivityState{}, err
+	}
+	id := normalizeGamePath(pathName)
+	if config.DisabledGames == nil {
+		config.DisabledGames = map[string]bool{}
+	}
+	if enabled {
+		delete(config.DisabledGames, id)
+	} else {
+		config.DisabledGames[id] = true
+	}
 	if err := saveGameActivityConfig(config); err != nil {
 		return gameActivityState{}, err
 	}
@@ -507,5 +547,8 @@ func (d *discordApp) gameActivityStateUnlocked(config gameActivityConfig) (gameA
 			running[i].Name = override
 		}
 	}
-	return gameActivityState{DetectionEnabled: config.DetectionEnabled, RunningGames: running, GamesSeen: deduplicateGameEntries(config.GamesSeen, config.Overrides), Overrides: config.Overrides}, nil
+	if config.DisabledGames == nil {
+		config.DisabledGames = map[string]bool{}
+	}
+	return gameActivityState{DetectionEnabled: config.DetectionEnabled, RunningGames: running, GamesSeen: deduplicateGameEntries(config.GamesSeen, config.Overrides), Overrides: config.Overrides, DisabledGames: config.DisabledGames}, nil
 }
