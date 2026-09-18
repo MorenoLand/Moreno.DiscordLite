@@ -299,7 +299,7 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 	}
 	id := normalizeGamePath(pathName)
 	delete(config.Overrides, id)
-	filtered := config.GamesSeen[:0]
+	filtered := make([]gameActivityEntry, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
 		if normalizeGamePath(entry.Path) != id {
 			filtered = append(filtered, entry)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -103,31 +104,42 @@ func processPath(pid uint32) string {
 	return syscall.UTF16ToString(buffer[:length])
 }
 
-func visibleWindowTitles() map[uint32]string {
-	result := map[uint32]string{}
-	callback := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		visible, _, _ := isWindowVisible.Call(hwnd)
-		if visible == 0 {
-			return 1
-		}
-		var pid uint32
-		getWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-		if pid == 0 {
-			return 1
-		}
-		length, _, _ := getWindowTextLength.Call(hwnd)
-		if length == 0 {
-			return 1
-		}
-		buffer := make([]uint16, length+1)
-		getWindowText.Call(hwnd, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)))
-		if title := strings.TrimSpace(syscall.UTF16ToString(buffer)); title != "" {
-			result[pid] = title
-		}
+var (
+	enumWindowsMu       sync.Mutex
+	currentEnumTitles   map[uint32]string
+	enumWindowsCallback = syscall.NewCallback(enumWindowsProc)
+)
+
+func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
+	visible, _, _ := isWindowVisible.Call(hwnd)
+	if visible == 0 {
 		return 1
-	})
-	enumWindows.Call(callback, 0)
-	return result
+	}
+	var pid uint32
+	getWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return 1
+	}
+	length, _, _ := getWindowTextLength.Call(hwnd)
+	if int32(length) <= 0 || int32(length) > 1024 {
+		return 1
+	}
+	buffer := make([]uint16, length+1)
+	getWindowText.Call(hwnd, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)))
+	if title := strings.TrimSpace(syscall.UTF16ToString(buffer)); title != "" {
+		currentEnumTitles[pid] = title
+	}
+	return 1
+}
+
+func visibleWindowTitles() map[uint32]string {
+	enumWindowsMu.Lock()
+	defer enumWindowsMu.Unlock()
+	currentEnumTitles = map[uint32]string{}
+	enumWindows.Call(enumWindowsCallback, 0)
+	titles := currentEnumTitles
+	currentEnumTitles = nil
+	return titles
 }
 
 func ignoredGameProcess(name string) bool {
