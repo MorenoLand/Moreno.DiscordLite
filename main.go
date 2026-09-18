@@ -11,8 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +24,6 @@ import (
 const (
 	vencordJSURL  = "https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.js"
 	vencordCSSURL = "https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.css"
-	userAgent     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
 //go:embed frontend/dist
@@ -38,6 +37,9 @@ var embeddedVencordJS string
 
 //go:embed vencord/browser.css
 var embeddedVencordCSS string
+
+//go:embed game_activity.js
+var embeddedGameActivityJS string
 
 type bridgeRequest struct {
 	ID     string          `json:"id"`
@@ -141,6 +143,41 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			err := d.download(window, args.URL, args.Filename)
 			d.respond(window, request.ID, nil, err)
 		}()
+	case "vc_game_activity":
+		go func() {
+			value, err := d.gameActivityState()
+			d.respond(window, request.ID, value, err)
+		}()
+	case "vc_game_activity_add":
+		var args bridgeGameActivityAddArgs
+		if err := json.Unmarshal(request.Args, &args); err != nil {
+			d.respond(window, request.ID, nil, fmt.Errorf("invalid game activity arguments"))
+			return
+		}
+		go func() {
+			value, err := d.addGameActivity(window, args)
+			if err == nil {
+				encoded, _ := json.Marshal(value)
+				window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+			}
+			d.respond(window, request.ID, value, err)
+		}()
+	case "vc_game_activity_remove":
+		var args bridgeGameActivityPathArgs
+		if err := json.Unmarshal(request.Args, &args); err != nil || args.Path == "" {
+			d.respond(window, request.ID, nil, fmt.Errorf("invalid game activity path"))
+			return
+		}
+		value, err := d.removeGameActivity(args.Path)
+		d.respond(window, request.ID, value, err)
+	case "vc_game_activity_set_detection":
+		var args bridgeGameActivityDetectionArgs
+		if err := json.Unmarshal(request.Args, &args); err != nil {
+			d.respond(window, request.ID, nil, fmt.Errorf("invalid game activity detection setting"))
+			return
+		}
+		value, err := d.setGameActivityDetection(args.Enabled)
+		d.respond(window, request.ID, value, err)
 	}
 }
 
@@ -231,11 +268,23 @@ func openURL(rawURL string) error {
 }
 
 func readVencordFile(name, fallback string) (string, error) {
-	data, err := os.ReadFile(path.Join("vencord", name))
+	directory, err := vencordCacheDir()
+	if err != nil {
+		return fallback, err
+	}
+	data, err := os.ReadFile(filepath.Join(directory, name))
 	if err != nil {
 		return fallback, err
 	}
 	return string(data), nil
+}
+
+func vencordCacheDir() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, "Moreno", "DiscordLite", "vencord"), nil
 }
 
 func updateVencord() error {
@@ -248,17 +297,19 @@ func updateVencord() error {
 	if err != nil {
 		return fmt.Errorf("browser.css: %w", err)
 	}
-	if err := os.MkdirAll("vencord", 0755); err != nil {
+	directory, err := vencordCacheDir()
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path.Join("vencord", "browser.js"), js, 0644); err != nil {
+	if err := os.MkdirAll(directory, 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path.Join("vencord", "browser.css"), css, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "browser.js"), js, 0644); err != nil {
 		return err
 	}
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	_ = os.WriteFile(path.Join("vencord", ".last_update"), []byte(timestamp), 0644)
+	if err := os.WriteFile(filepath.Join(directory, "browser.css"), css, 0644); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -275,15 +326,17 @@ func fetchBytes(client *http.Client, rawURL string) ([]byte, error) {
 }
 
 func checkAndUpdateVencord() {
-	data, err := os.ReadFile(path.Join("vencord", ".last_update"))
-	if err == nil {
-		if timestamp, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); parseErr == nil {
-			if time.Since(time.Unix(timestamp, 0)) <= 24*time.Hour {
-				return
-			}
+	directory, err := vencordCacheDir()
+	if err != nil {
+		return
+	}
+	for _, name := range []string{"browser.js", "browser.css"} {
+		info, statErr := os.Stat(filepath.Join(directory, name))
+		if statErr != nil || time.Since(info.ModTime()) > 24*time.Hour {
+			_ = updateVencord()
+			return
 		}
 	}
-	_ = updateVencord()
 }
 
 func sanitizeFilename(filename string) string {
@@ -421,8 +474,11 @@ document.addEventListener('contextmenu',function(e){var img=e.target&&e.target.c
 func (d *discordApp) injectPage(window *application.WebviewWindow) {
 	vencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
 	vencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
+	initialGameActivity, _ := d.gameActivityState()
+	encodedGameActivity, _ := json.Marshal(initialGameActivity)
+	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"
 	css := vencordCSSInjectionScript(vencordCSS)
-	for _, script := range []string{wailsBridgeJS, resizeJS, vencordJS, spoofJS, titlebarJS, downloadJS, imageSaveJS, css} {
+	for _, script := range []string{wailsBridgeJS, resizeJS, vencordJS, spoofJS, titlebarJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, css} {
 		window.ExecJS(script)
 	}
 }
@@ -445,6 +501,7 @@ func main() {
 	checkAndUpdateVencord()
 	startDiscordRPCBridge()
 	discord := &discordApp{recentDownload: make(map[string]time.Time)}
+	startGameActivityObserver()
 	app := application.New(application.Options{
 		Name:        "Discord",
 		Description: "Unofficial Discord desktop wrapper",
@@ -453,7 +510,6 @@ func main() {
 		Windows: application.WindowsOptions{
 			DisableQuitOnLastWindowClosed: true,
 			AdditionalBrowserArgs: []string{
-				"--user-agent=" + userAgent,
 				"--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
 				"--disable-extensions",
 				"--disable-component-update",
@@ -466,7 +522,6 @@ func main() {
 				"--js-flags=--max-old-space-size=512",
 				"--enable-low-res-tiling",
 				"--num-raster-threads=2",
-				"--use-fake-ui-for-media-stream",
 			},
 		},
 		Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true},
@@ -477,7 +532,10 @@ func main() {
 	discord.app = app
 	initialVencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
 	initialVencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
-	initializationJS := strings.Join([]string{wailsBridgeJS, resizeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, imageSaveJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
+	initialGameActivity, _ := discord.gameActivityState()
+	encodedGameActivity, _ := json.Marshal(initialGameActivity)
+	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"
+	initializationJS := strings.Join([]string{wailsBridgeJS, resizeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:          "main",
 		Title:         "Discord",
@@ -490,13 +548,13 @@ func main() {
 		Frameless:     true,
 		DisableResize: false,
 		Permissions: map[application.PermissionType]application.Permission{
-			application.PermissionCamera:        application.PermissionAllow,
-			application.PermissionMicrophone:    application.PermissionAllow,
+			application.PermissionCamera:        application.PermissionDefault,
+			application.PermissionMicrophone:    application.PermissionDefault,
 			application.PermissionClipboardRead: application.PermissionAllow,
 		},
 		EnableFileDrop:  false,
 		DevToolsEnabled: true,
-		Windows:         application.WindowsWindow{DisableIcon: true, NonClientRegionSupport: true},
+		Windows:         application.WindowsWindow{NonClientRegionSupport: true},
 		StartState:      application.WindowStateNormal,
 		InitialPosition: application.WindowCentered,
 	})
@@ -567,7 +625,7 @@ var s=document.createElement('style');s.id='vc-tb-css';s.textContent='.vc-win-bt
 function iv(cmd,args){try{var t=window.__vcWails;if(t&&t.invoke){t.invoke(cmd,args).catch(function(){});return true;}}catch(e){}return false;}
 function inject(){var trailing=document.querySelector('[data-window-chrome="true"] > [class*="trailing_"]');if(!trailing||document.getElementById('vc-tb-btns'))return;var w=document.createElement('div');w.id='vc-tb-btns';trailing.appendChild(w);function mkBtn(id,cls,svg){var b=document.createElement('button');b.className='vc-win-btn'+(cls?' '+cls:'');b.id=id;b.innerHTML=svg;return b;}w.appendChild(mkBtn('vc-min','', '<svg width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg>'));w.appendChild(mkBtn('vc-max','', '<svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>'));w.appendChild(mkBtn('vc-close','vc-close','<svg width="10" height="10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2"/></svg>'));document.getElementById('vc-min').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_minimize');});document.getElementById('vc-max').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_toggle_maximize');});document.getElementById('vc-close').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();iv('vc_hide');});}
 inject();var ti=0,mo=new MutationObserver(function(){if(ti)return;ti=setTimeout(function(){ti=0;inject();},250);});function om(){var root=document.documentElement;if(root)mo.observe(root,{childList:true,subtree:true});else setTimeout(om,100);}om();
-document.addEventListener('click',function(e){var a=e.target.closest('a[href]');if(a&&a.target==='_blank'){try{var u=new URL(a.href,location.origin);if(u.hostname!=='discord.com'&&u.hostname.indexOf('.discord.com')<0&&u.hostname.indexOf('.discordapp.com')<0){e.preventDefault();e.stopPropagation();window.__vcWails.shell.open(u.href);}}catch(ex){}}},true);
+document.addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;if(a.target==='_blank'&&a.matches('[data-list-item-id^="channels___"][aria-label$="(voice channel)"]')){a.removeAttribute('target');return;}if(a.target==='_blank'&&a.hasAttribute('href')){try{var u=new URL(a.href,location.origin);if(u.hostname!=='discord.com'&&u.hostname.indexOf('.discord.com')<0&&u.hostname.indexOf('.discordapp.com')<0){e.preventDefault();e.stopPropagation();window.__vcWails.shell.open(u.href);}}catch(ex){}}},true);
 document.addEventListener('mousedown',function(e){if(e.button!==0)return;if(e.target.closest('.vc-win-btn,.clickable,[role="button"],a,button,input,select,textarea,[contenteditable]'))return;if(e.target.closest('[class*="bar_"][class*="c3"]')){e.preventDefault();iv('vc_start_drag');}},true);
 }
 start();
