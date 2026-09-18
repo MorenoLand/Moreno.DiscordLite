@@ -380,21 +380,7 @@ func (d *discordApp) gameActivityState() (gameActivityState, error) {
 	if err != nil {
 		return gameActivityState{}, err
 	}
-	running := []gameProcess{}
-	if config.DetectionEnabled {
-		running = cachedGameActivityProcesses()
-	}
-	config.GamesSeen = deduplicateGameEntries(config.GamesSeen, config.Overrides)
-	for i := range running {
-		id := normalizeGamePath(running[i].Path)
-		if override := config.Overrides[id]; override != "" {
-			running[i].Name = override
-		}
-	}
-	sort.Slice(config.GamesSeen, func(i, j int) bool {
-		return strings.ToLower(config.GamesSeen[i].Name) < strings.ToLower(config.GamesSeen[j].Name)
-	})
-	return gameActivityState{DetectionEnabled: config.DetectionEnabled, RunningGames: running, GamesSeen: config.GamesSeen, Overrides: config.Overrides}, nil
+	return d.gameActivityStateUnlocked(config)
 }
 
 func deduplicateGameEntries(entries []gameActivityEntry, overrides map[string]string) []gameActivityEntry {
@@ -550,5 +536,9 @@ func (d *discordApp) gameActivityStateUnlocked(config gameActivityConfig) (gameA
 	if config.DisabledGames == nil {
 		config.DisabledGames = map[string]bool{}
 	}
-	return gameActivityState{DetectionEnabled: config.DetectionEnabled, RunningGames: running, GamesSeen: deduplicateGameEntries(config.GamesSeen, config.Overrides), Overrides: config.Overrides, DisabledGames: config.DisabledGames}, nil
+	gamesSeen := deduplicateGameEntries(config.GamesSeen, config.Overrides)
+	sort.Slice(gamesSeen, func(i, j int) bool {
+		return strings.ToLower(gamesSeen[i].Name) < strings.ToLower(gamesSeen[j].Name)
+	})
+	return gameActivityState{DetectionEnabled: config.DetectionEnabled, RunningGames: running, GamesSeen: gamesSeen, Overrides: config.Overrides, DisabledGames: config.DisabledGames}, nil
 }
