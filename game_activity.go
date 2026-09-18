@@ -158,6 +158,7 @@ type gameActivityConfig struct {
 	GamesSeen        []gameActivityEntry `json:"gamesSeen"`
 	Overrides        map[string]string   `json:"overrides"`
 	DisabledGames    map[string]bool     `json:"disabledGames"`
+	IgnoredGames     map[string]bool     `json:"ignoredGames,omitempty"`
 }
 
 type gameActivityState struct {
@@ -229,7 +230,11 @@ func refreshGameActivityProcesses() []gameProcess {
 	}
 	candidates := make([]string, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
-		if entry.Source == "manual" || config.Overrides[normalizeGamePath(entry.Path)] != "" || likelyGamePath(entry.Path) {
+		entryID := normalizeGamePath(entry.Path)
+		if config.IgnoredGames != nil && config.IgnoredGames[entryID] {
+			continue
+		}
+		if entry.Source == "manual" || config.Overrides[entryID] != "" || likelyGamePath(entry.Path) {
 			candidates = append(candidates, entry.Path)
 		}
 	}
@@ -237,6 +242,14 @@ func refreshGameActivityProcesses() []gameProcess {
 	if err != nil {
 		return nil
 	}
+	filteredRunning := make([]gameProcess, 0, len(running))
+	for _, p := range running {
+		pID := normalizeGamePath(p.Path)
+		if config.IgnoredGames == nil || !config.IgnoredGames[pID] {
+			filteredRunning = append(filteredRunning, p)
+		}
+	}
+	running = filteredRunning
 	setCachedGameActivityProcesses(running)
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
@@ -247,7 +260,7 @@ func refreshGameActivityProcesses() []gameProcess {
 	changed := false
 	for _, process := range running {
 		id := normalizeGamePath(process.Path)
-		if id == "" {
+		if id == "" || (config.IgnoredGames != nil && config.IgnoredGames[id]) {
 			continue
 		}
 		found := false
@@ -307,6 +320,16 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 	if config.Overrides == nil {
 		config.Overrides = map[string]string{}
 	}
+	if config.IgnoredGames == nil {
+		config.IgnoredGames = map[string]bool{}
+	}
+	cleanIgnored := map[string]bool{}
+	for k, v := range config.IgnoredGames {
+		if v && normalizeGamePath(k) != "" {
+			cleanIgnored[normalizeGamePath(k)] = true
+		}
+	}
+	config.IgnoredGames = cleanIgnored
 	cleanDisabled := map[string]bool{}
 	for k, v := range config.DisabledGames {
 		if v && normalizeGamePath(k) != "" {
@@ -323,6 +346,10 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 	}
 	filteredSeen := make([]gameActivityEntry, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
+		if config.IgnoredGames[normalizeGamePath(entry.Path)] {
+			needsSave = true
+			continue
+		}
 		exe := strings.ToLower(filepath.Base(entry.Path))
 		if (exe == "javaw.exe" || exe == "java.exe") && entry.Name == "Minecraft" && entry.Source == "detected" {
 			needsSave = true
@@ -444,6 +471,9 @@ func (d *discordApp) addGameActivity(window application.Window, args bridgeGameA
 		return gameActivityState{}, err
 	}
 	id := normalizeGamePath(pathName)
+	if config.IgnoredGames != nil {
+		delete(config.IgnoredGames, id)
+	}
 	name := strings.TrimSpace(args.Name)
 	if name == "" || strings.ContainsAny(name, `\/`) {
 		name = gameDisplayName(pathName)
@@ -477,6 +507,12 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 		return gameActivityState{}, err
 	}
 	id := normalizeGamePath(pathName)
+	if config.IgnoredGames == nil {
+		config.IgnoredGames = map[string]bool{}
+	}
+	if id != "" {
+		config.IgnoredGames[id] = true
+	}
 	delete(config.Overrides, id)
 	for k := range config.DisabledGames {
 		if normalizeGamePath(k) == id || strings.EqualFold(k, pathName) {
@@ -486,7 +522,7 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 	delete(config.DisabledGames, id)
 	filtered := make([]gameActivityEntry, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
-		if normalizeGamePath(entry.Path) != id {
+		if normalizeGamePath(entry.Path) != id && !strings.EqualFold(entry.Path, pathName) && !strings.EqualFold(entry.ID, id) {
 			filtered = append(filtered, entry)
 		}
 	}
@@ -494,6 +530,14 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 	if err := saveGameActivityConfig(config); err != nil {
 		return gameActivityState{}, err
 	}
+	running := cachedGameActivityProcesses()
+	filteredRunning := make([]gameProcess, 0, len(running))
+	for _, p := range running {
+		if normalizeGamePath(p.Path) != id && !strings.EqualFold(p.Path, pathName) {
+			filteredRunning = append(filteredRunning, p)
+		}
+	}
+	setCachedGameActivityProcesses(filteredRunning)
 	return d.gameActivityStateUnlocked(config)
 }
 
@@ -555,7 +599,12 @@ func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, 
 func (d *discordApp) gameActivityStateUnlocked(config gameActivityConfig) (gameActivityState, error) {
 	running := []gameProcess{}
 	if config.DetectionEnabled {
-		running = cachedGameActivityProcesses()
+		allRunning := cachedGameActivityProcesses()
+		for _, p := range allRunning {
+			if config.IgnoredGames == nil || !config.IgnoredGames[normalizeGamePath(p.Path)] {
+				running = append(running, p)
+			}
+		}
 	}
 	for i := range running {
 		if override := config.Overrides[normalizeGamePath(running[i].Path)]; override != "" {

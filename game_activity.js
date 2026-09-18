@@ -204,6 +204,7 @@ toggle.type='checkbox';
 toggle.checked=!!isEnabled;
 toggle.dataset.vcGameToggle='1';
 toggle.dataset.vcPath=path;
+toggle.setAttribute('data-vc-path',path);
 var slider=document.createElement('span');
 slider.className='vc-slider';
 switchSpan.append(toggle,slider);
@@ -211,6 +212,7 @@ r.append(switchSpan);
 if(remove){
 var action=button('Remove','remove','vc-danger');
 action.dataset.vcPath=path;
+action.setAttribute('data-vc-path',path);
 r.append(action);
 }
 return r;
@@ -791,13 +793,34 @@ updateDetectedGamePresence(d);
 lastRenderedSignature='';
 refresh();
 }else if(kind==='remove'){
-invoke('vc_game_activity_remove',{path:action.dataset.vcPath}).then(function(d){
+var path=action.dataset.vcPath||action.getAttribute('data-vc-path');
+if(!path){
+var rowEl=action.closest('.vc-game-row');
+var pathEl=rowEl&&rowEl.querySelector('[data-vc-path]');
+path=pathEl&&(pathEl.dataset.vcPath||pathEl.getAttribute('data-vc-path'));
+}
+if(!path)return;
+pausePollUntil=Date.now()+3000;
+var rowNode=action.closest('.vc-game-row');
+if(rowNode)rowNode.remove();
+var nPath=normId(path);
+if(lastAppliedData){
+lastAppliedData.gamesSeen=(lastAppliedData.gamesSeen||[]).filter(function(g){return normId(g.path)!==nPath;});
+lastAppliedData.runningGames=(lastAppliedData.runningGames||[]).filter(function(g){return normId(g.path)!==nPath;});
+lastRenderedSignature=getStateSignature(lastAppliedData);
+updateDetectedGamePresence(lastAppliedData);
+}
+invoke('vc_game_activity_remove',{path:path}).then(function(d){
 if(d){
 lastAppliedData=d;
+lastRenderedSignature=getStateSignature(d);
 render(d);
 updateDetectedGamePresence(d);
 }
-}).catch(showActionError);
+}).catch(function(err){
+showActionError(err);
+refresh();
+});
 }
 }
 window.addEventListener('click',function(event){
