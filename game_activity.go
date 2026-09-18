@@ -525,9 +525,6 @@ func (d *discordApp) toggleGameActivity(pathName string, enabled bool) (gameActi
 }
 
 func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, error) {
-	if enabled {
-		refreshGameActivityProcesses()
-	}
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err := loadGameActivityConfig()
@@ -540,6 +537,17 @@ func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, 
 	}
 	if err := saveGameActivityConfig(config); err != nil {
 		return gameActivityState{}, err
+	}
+	if enabled {
+		candidates := make([]string, 0, len(config.GamesSeen))
+		for _, entry := range config.GamesSeen {
+			if entry.Source == "manual" || config.Overrides[normalizeGamePath(entry.Path)] != "" || likelyGamePath(entry.Path) {
+				candidates = append(candidates, entry.Path)
+			}
+		}
+		if running, err := enumerateGameProcesses(candidates...); err == nil {
+			setCachedGameActivityProcesses(running)
+		}
 	}
 	return d.gameActivityStateUnlocked(config)
 }

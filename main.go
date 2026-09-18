@@ -181,10 +181,6 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			return
 		}
 		value, err := d.setGameActivityDetection(args.Enabled)
-		if err == nil {
-			encoded, _ := json.Marshal(value)
-			window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
-		}
 		d.respond(window, request.ID, value, err)
 	case "vc_game_activity_toggle_game":
 		var args bridgeGameActivityToggleGameArgs
@@ -193,10 +189,6 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 			return
 		}
 		value, err := d.toggleGameActivity(args.Path, args.Enabled)
-		if err == nil {
-			encoded, _ := json.Marshal(value)
-			window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
-		}
 		d.respond(window, request.ID, value, err)
 	}
 }

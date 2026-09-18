@@ -14,14 +14,20 @@ style.textContent=
 '#vc-game-activity-nav.vc-selected,#vc-game-activity-nav[class*="selected_"]{color:var(--interactive-active,var(--text-normal,#fff))!important;background-color:var(--background-modifier-selected,#4e5058)!important;border-radius:var(--radius-sm,4px)!important;}' +
 '#vc-game-activity-nav.vc-selected *,#vc-game-activity-nav[class*="selected_"] *{color:var(--interactive-active,var(--text-normal,#fff))!important;}' +
 '#vc-game-activity-nav .vc-game-activity-icon{width:20px!important;height:20px!important;flex-shrink:0!important;}' +
-'#vc-game-activity-panel{box-sizing:border-box!important;position:fixed!important;z-index:2147483647!important;background:var(--background-primary,#1e1f22)!important;color:var(--text-normal,#dbdee1)!important;font-family:var(--font-primary,Whitney,"Helvetica Neue",Helvetica,Arial,sans-serif)!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;padding:0!important;margin:0!important;}' +
+'#vc-game-activity-panel{box-sizing:border-box!important;position:fixed!important;z-index:2147483647!important;background:var(--background-primary,#1e1f22)!important;color:var(--text-normal,#dbdee1)!important;font-family:var(--font-primary,Whitney,"Helvetica Neue",Helvetica,Arial,sans-serif)!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;padding:0!important;margin:0!important;border-top-right-radius:8px!important;border-bottom-right-radius:8px!important;}' +
 '#vc-game-activity-panel *{box-sizing:border-box!important;}' +
-'#vc-game-activity-panel .vc-header{height:56px!important;min-height:56px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;padding:0 40px!important;border-bottom:1px solid var(--background-modifier-accent,rgba(255,255,255,0.08))!important;background:var(--background-primary,#1e1f22)!important;flex-shrink:0!important;}' +
+'#vc-game-activity-panel .vc-header{height:56px!important;min-height:56px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;padding:0 40px!important;border-bottom:1px solid var(--background-modifier-accent,rgba(255,255,255,0.08))!important;background:var(--background-primary,#1e1f22)!important;flex-shrink:0!important;border-top-right-radius:8px!important;}' +
 '#vc-game-activity-panel .vc-breadcrumb{font-size:15px!important;font-weight:600!important;color:var(--header-primary,#f2f3f5)!important;}' +
 '#vc-game-activity-panel .vc-close-btn{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:32px!important;height:32px!important;padding:0!important;border-radius:4px!important;background:transparent!important;color:var(--interactive-normal,#b5bac1)!important;border:none!important;cursor:pointer!important;transition:background-color .15s ease,color .15s ease!important;}' +
 '#vc-game-activity-panel .vc-close-btn:hover{background:var(--background-modifier-hover,rgba(255,255,255,0.07))!important;color:var(--interactive-hover,#fff)!important;}' +
 '#vc-game-activity-panel .vc-close-btn svg{width:16px!important;height:16px!important;}' +
-'#vc-game-activity-panel .vc-body{flex:1!important;overflow-y:auto!important;overflow-x:hidden!important;padding:32px 40px 60px!important;}' +
+'#vc-game-activity-panel .vc-body{flex:1!important;overflow-y:scroll!important;overflow-x:hidden!important;padding:32px 40px 60px!important;border-bottom-right-radius:8px!important;scrollbar-width:thin!important;scrollbar-color:var(--scrollbar-auto-thumb,#1a1b1e) transparent!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar{width:8px!important;background:transparent!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar-track{background:transparent!important;border:none!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar-thumb{background-color:var(--scrollbar-auto-thumb,#1a1b1e)!important;min-height:40px!important;border-radius:4px!important;border:2px solid transparent!important;background-clip:padding-box!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar-thumb:hover{background-color:var(--scrollbar-auto-thumb-hover,#111214)!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar-button{display:none!important;width:0!important;height:0!important;}' +
+'#vc-game-activity-panel .vc-body::-webkit-scrollbar-corner{background:transparent!important;}' +
 '#vc-game-activity-panel .vc-inner{max-width:740px!important;width:100%!important;margin:0!important;}' +
 '#vc-game-activity-panel h1{font-size:20px!important;line-height:24px!important;font-weight:600!important;margin:0 0 8px!important;color:var(--header-primary,#f2f3f5)!important;}' +
 '#vc-game-activity-panel h2{font-size:13px!important;font-weight:700!important;line-height:18px!important;text-transform:uppercase!important;letter-spacing:0.02em!important;margin:28px 0 12px!important;color:var(--header-secondary,#b5bac1)!important;}' +
@@ -113,6 +119,16 @@ panel.style.setProperty('width',b.width+'px','important');
 panel.style.setProperty('height',b.height+'px','important');
 panel.style.setProperty('right','auto','important');
 panel.style.setProperty('bottom','auto','important');
+var cr=findContentRegion();
+if(cr&&cr.isConnected){
+try{
+var st=window.getComputedStyle(cr);
+if(st.borderTopRightRadius&&st.borderTopRightRadius!=='0px'){
+panel.style.setProperty('border-top-right-radius',st.borderTopRightRadius,'important');
+panel.style.setProperty('border-bottom-right-radius',st.borderBottomRightRadius,'important');
+}
+}catch(e){}
+}
 }
 function findDiscordSettingsCloseButton(){
 var buttons=document.querySelectorAll(
@@ -237,7 +253,8 @@ header.append(breadcrumb,closeBtn);
 panel.append(header);
 
 var body=document.createElement('div');
-body.className='vc-body';
+body.className='vc-body scroller__6131a auto_d125d2 scrollerBase_d125d2';
+body.setAttribute('dir','ltr');
 var inner=document.createElement('div');
 inner.className='vc-inner';
 
@@ -429,8 +446,12 @@ function onOpen(){
 activePresenceKey=null;
 if(lastAppliedData)updateDetectedGamePresence(lastAppliedData);
 }
+try{
+if(typeof d.subscribe==='function'){
 d.subscribe('CONNECTION_OPEN',onOpen);
 d.subscribe('POST_CONNECTION_OPEN',onOpen);
+}
+}catch(e){}
 }
 function updateDetectedGamePresence(data){
 if(!data)return;
@@ -446,7 +467,6 @@ if(!activeGames.length){
 if(activePresenceKey!==null){
 activePresenceKey=null;
 queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null});
-queueDispatch(dispatcher,{type:'RUNNING_GAME_SET_DEBUG_GAME',game:null});
 }
 return;
 }
@@ -454,44 +474,29 @@ var primary=activeGames[0];
 var exeName=primary.path?primary.path.replace(/^.*[\\\/]/,'').toLowerCase():'';
 var known=KNOWN_GAMES[exeName];
 var app=detectableExes?detectableExes.get(exeName):null;
-var appId=primary.applicationId||(app&&app.id)||(known&&known.id)||'0';
+var appId=primary.applicationId||(app&&app.id)||(known&&known.id)||'';
 var gameName=resolveDisplayName(primary.name,primary.path,data.overrides);
 var presenceKey=primary.path+'|'+gameName+'|'+appId;
 if(activePresenceKey===presenceKey)return;
 activePresenceKey=presenceKey;
 var activity={
-application_id:appId,
 name:gameName,
 type:0,
 flags:1,
 platform:'desktop',
 timestamps:{
-start:primary.start||Date.now()
+start:(typeof primary.start==='number'&&primary.start>0)?primary.start:Date.now()
 }
 };
-queueDispatch(dispatcher,{
+if(appId&&appId!=='0')activity.application_id=appId;
+var payload={
 type:'LOCAL_ACTIVITY_UPDATE',
 socketId:'GameActivity',
-pid:primary.pid||0,
-applicationId:appId,
 activity:activity
-});
-queueDispatch(dispatcher,{
-type:'RUNNING_GAME_SET_DEBUG_GAME',
-game:{
-id:appId,
-name:gameName,
-exePath:primary.path,
-exeName:exeName,
-cmdLine:primary.path,
-pid:primary.pid,
-start:primary.start||Date.now(),
-isLauncher:false,
-hidden:false,
-elevated:false,
-windowHandle:null
-}
-});
+};
+if(appId&&appId!=='0')payload.applicationId=appId;
+if(typeof primary.pid==='number'&&primary.pid>0)payload.pid=primary.pid;
+queueDispatch(dispatcher,payload);
 }
 function applyRPCActivity(dispatcher,socketId,activity,pid){
 if(activity){
