@@ -193,7 +193,6 @@ var gameActivityRunning []gameProcess
 func (d *discordApp) startGameActivityObserver() {
 	go func() {
 		for {
-			refreshGameActivityProcesses()
 			if d.window != nil {
 				if state, err := d.gameActivityState(); err == nil {
 					encoded, _ := json.Marshal(state)
@@ -255,8 +254,10 @@ func refreshGameActivityProcesses() []gameProcess {
 		for i := range config.GamesSeen {
 			if normalizeGamePath(config.GamesSeen[i].Path) == id {
 				found = true
-				config.GamesSeen[i].LastSeen = time.Now()
-				changed = true
+				if time.Since(config.GamesSeen[i].LastSeen) > 5*time.Minute {
+					config.GamesSeen[i].LastSeen = time.Now()
+					changed = true
+				}
 				break
 			}
 		}
@@ -306,9 +307,13 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 	if config.Overrides == nil {
 		config.Overrides = map[string]string{}
 	}
-	if config.DisabledGames == nil {
-		config.DisabledGames = map[string]bool{}
+	cleanDisabled := map[string]bool{}
+	for k, v := range config.DisabledGames {
+		if v && normalizeGamePath(k) != "" {
+			cleanDisabled[normalizeGamePath(k)] = true
+		}
 	}
+	config.DisabledGames = cleanDisabled
 	needsSave := false
 	for k, v := range config.Overrides {
 		if strings.ContainsAny(v, `\/`) {
@@ -473,6 +478,11 @@ func (d *discordApp) removeGameActivity(pathName string) (gameActivityState, err
 	}
 	id := normalizeGamePath(pathName)
 	delete(config.Overrides, id)
+	for k := range config.DisabledGames {
+		if normalizeGamePath(k) == id || strings.EqualFold(k, pathName) {
+			delete(config.DisabledGames, k)
+		}
+	}
 	delete(config.DisabledGames, id)
 	filtered := make([]gameActivityEntry, 0, len(config.GamesSeen))
 	for _, entry := range config.GamesSeen {
@@ -499,6 +509,11 @@ func (d *discordApp) toggleGameActivity(pathName string, enabled bool) (gameActi
 		config.DisabledGames = map[string]bool{}
 	}
 	if enabled {
+		for k := range config.DisabledGames {
+			if normalizeGamePath(k) == id || strings.EqualFold(k, pathName) {
+				delete(config.DisabledGames, k)
+			}
+		}
 		delete(config.DisabledGames, id)
 	} else {
 		config.DisabledGames[id] = true
@@ -510,6 +525,9 @@ func (d *discordApp) toggleGameActivity(pathName string, enabled bool) (gameActi
 }
 
 func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, error) {
+	if enabled {
+		refreshGameActivityProcesses()
+	}
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err := loadGameActivityConfig()
@@ -517,6 +535,9 @@ func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, 
 		return gameActivityState{}, err
 	}
 	config.DetectionEnabled = enabled
+	if !enabled {
+		setCachedGameActivityProcesses(nil)
+	}
 	if err := saveGameActivityConfig(config); err != nil {
 		return gameActivityState{}, err
 	}
