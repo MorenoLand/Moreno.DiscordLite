@@ -15,21 +15,31 @@ import (
 
 const maxRPCPayload = 16 * 1024 * 1024
 
-func startDiscordRPCBridge() {
-	go func() {
-		for {
-			pipe, err := createRPCPipe(0)
-			if err == nil {
-				connectErr := windows.ConnectNamedPipe(pipe, nil)
-				if connectErr == nil || errors.Is(connectErr, windows.ERROR_PIPE_CONNECTED) {
-					_ = serveRPCClient(pipe)
-				}
-				_ = windows.DisconnectNamedPipe(pipe)
-				_ = windows.CloseHandle(pipe)
-			}
+func startDiscordRPCBridge(app *discordApp) {
+	for i := uint8(0); i < 10; i++ {
+		go listenRPCPipe(app, i)
+	}
+}
+
+func listenRPCPipe(app *discordApp, index uint8) {
+	for {
+		pipe, err := createRPCPipe(index)
+		if err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		connectErr := windows.ConnectNamedPipe(pipe, nil)
+		if connectErr == nil || errors.Is(connectErr, windows.ERROR_PIPE_CONNECTED) {
+			go func(p windows.Handle) {
+				defer windows.DisconnectNamedPipe(p)
+				defer windows.CloseHandle(p)
+				_ = serveRPCClient(app, p)
+			}(pipe)
+		} else {
+			_ = windows.CloseHandle(pipe)
 			time.Sleep(100 * time.Millisecond)
 		}
-	}()
+	}
 }
 
 func createRPCPipe(index uint8) (windows.Handle, error) {
@@ -44,7 +54,17 @@ func createRPCPipe(index uint8) (windows.Handle, error) {
 	return pipe, nil
 }
 
-func serveRPCClient(pipe windows.Handle) error {
+func serveRPCClient(app *discordApp, pipe windows.Handle) error {
+	var clientID string
+	var currentSocketID string
+	hasActivity := false
+
+	defer func() {
+		if hasActivity && currentSocketID != "" && app != nil {
+			app.setRPCActivity(currentSocketID, 0, nil)
+		}
+	}()
+
 	for {
 		op, payload, err := readRPCFrame(pipe)
 		if err != nil {
@@ -56,15 +76,35 @@ func serveRPCClient(pipe windows.Handle) error {
 		}
 		switch op {
 		case 0:
-			clientID, _ := value["client_id"].(string)
+			clientID, _ = value["client_id"].(string)
 			if clientID == "" {
 				clientID = "0"
 			}
-			if err := writeRPCFrame(pipe, 1, map[string]any{"cmd": "DISPATCH", "evt": "READY", "data": map[string]any{"v": 1, "config": map[string]any{"cdn_host": "cdn.discordapp.com", "api_endpoint": "//discord.com/api", "environment": "production"}, "user": map[string]any{"id": "0", "username": "Discord", "discriminator": "0000", "avatar": nil, "bot": false}, "client_id": clientID}}); err != nil {
+			currentSocketID = "RPC:" + clientID
+			if err := writeRPCFrame(pipe, 1, map[string]any{
+				"cmd": "DISPATCH",
+				"evt": "READY",
+				"data": map[string]any{
+					"v": 1,
+					"config": map[string]any{
+						"cdn_host":     "cdn.discordapp.com",
+						"api_endpoint": "//discord.com/api",
+						"environment":  "production",
+					},
+					"user": map[string]any{
+						"id":            "0",
+						"username":      "Discord",
+						"discriminator": "0000",
+						"avatar":        nil,
+						"bot":           false,
+					},
+					"client_id": clientID,
+				},
+			}); err != nil {
 				return err
 			}
 		case 1:
-			if err := handleRPCCommand(pipe, value); err != nil {
+			if err := handleRPCCommand(app, currentSocketID, clientID, pipe, value, &hasActivity); err != nil {
 				return err
 			}
 		case 3:
@@ -75,12 +115,34 @@ func serveRPCClient(pipe windows.Handle) error {
 	}
 }
 
-func handleRPCCommand(pipe windows.Handle, value map[string]any) error {
+func handleRPCCommand(app *discordApp, socketID, clientID string, pipe windows.Handle, value map[string]any, hasActivity *bool) error {
 	command, _ := value["cmd"].(string)
 	nonce := value["nonce"]
 	response := map[string]any{"cmd": command, "data": nil, "evt": nil, "nonce": nonce}
 	switch command {
-	case "SET_ACTIVITY", "SUBSCRIBE", "UNSUBSCRIBE":
+	case "SET_ACTIVITY":
+		args, _ := value["args"].(map[string]any)
+		act := args["activity"]
+		pid := args["pid"]
+		if act == nil {
+			if *hasActivity && socketID != "" && app != nil {
+				app.setRPCActivity(socketID, pid, nil)
+			}
+			*hasActivity = false
+			response["data"] = nil
+		} else {
+			if actMap, ok := act.(map[string]any); ok {
+				if _, hasAppID := actMap["application_id"]; !hasAppID && clientID != "" {
+					actMap["application_id"] = clientID
+				}
+			}
+			if socketID != "" && app != nil {
+				app.setRPCActivity(socketID, pid, act)
+				*hasActivity = true
+			}
+			response["data"] = act
+		}
+	case "SUBSCRIBE", "UNSUBSCRIBE":
 	case "AUTHORIZE":
 		response["data"] = map[string]any{"code": "discord-app-local"}
 	case "AUTHENTICATE":

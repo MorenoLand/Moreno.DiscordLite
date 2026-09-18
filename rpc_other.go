@@ -2,4 +2,4 @@
 
 package main
 
-func startDiscordRPCBridge() {}
+func startDiscordRPCBridge(_ *discordApp) {}

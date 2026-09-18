@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,10 +16,131 @@ import (
 )
 
 type gameProcess struct {
-	PID         uint32 `json:"pid"`
+	PID           uint32 `json:"pid"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	WindowTitle   string `json:"windowTitle"`
+	Start         int64  `json:"start,omitempty"`
+	ApplicationID string `json:"applicationId,omitempty"`
+}
+
+type knownGame struct {
+	ApplicationID string
+	Name          string
+}
+
+var defaultKnownGames = map[string]knownGame{
+	"wow.exe":                           {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
+	"wowclassic.exe":                    {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
+	"wowt.exe":                          {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
+	"wowb.exe":                          {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
+	"league of legends.exe":             {ApplicationID: "401518687463948290", Name: "League of Legends"},
+	"valorant.exe":                      {ApplicationID: "700144211132645406", Name: "VALORANT"},
+	"overwatch.exe":                     {ApplicationID: "356867200780468224", Name: "Overwatch"},
+	"csgo.exe":                          {ApplicationID: "738864303494791248", Name: "Counter-Strike 2"},
+	"cs2.exe":                           {ApplicationID: "738864303494791248", Name: "Counter-Strike 2"},
+	"dota2.exe":                         {ApplicationID: "738864293411684352", Name: "Dota 2"},
+	"gta5.exe":                          {ApplicationID: "436993026818867200", Name: "Grand Theft Auto V"},
+	"minecraft.exe":                     {ApplicationID: "356875127150903296", Name: "Minecraft"},
+	"javaw.exe":                         {ApplicationID: "356875127150903296", Name: "Minecraft"},
+	"rocketleague.exe":                  {ApplicationID: "356877028164632576", Name: "Rocket League"},
+	"fortniteclient-win64-shipping.exe": {ApplicationID: "432980957394370572", Name: "Fortnite"},
+	"genshinimpact.exe":                 {ApplicationID: "762434991303950386", Name: "Genshin Impact"},
+	"starrail.exe":                      {ApplicationID: "1100344445853245480", Name: "Honkai: Star Rail"},
+	"ffxiv_dx11.exe":                    {ApplicationID: "468936993781252096", Name: "FINAL FANTASY XIV"},
+	"r5apex.exe":                        {ApplicationID: "542385150820417537", Name: "Apex Legends"},
+}
+
+var (
+	cachedDetectableMu sync.RWMutex
+	cachedDetectable   map[string]knownGame
+)
+
+func resolveKnownGame(exeName string) (knownGame, bool) {
+	lower := strings.ToLower(exeName)
+	cachedDetectableMu.RLock()
+	if cachedDetectable != nil {
+		if game, ok := cachedDetectable[lower]; ok {
+			cachedDetectableMu.RUnlock()
+			return game, true
+		}
+	}
+	cachedDetectableMu.RUnlock()
+	if game, ok := defaultKnownGames[lower]; ok {
+		return game, true
+	}
+	return knownGame{}, false
+}
+
+func initDetectableCache() {
+	go func() {
+		cachePath, err := detectableCachePath()
+		if err == nil {
+			if data, err := os.ReadFile(cachePath); err == nil {
+				parseAndSetDetectable(data)
+			}
+		}
+		needFetch := true
+		if info, err := os.Stat(cachePath); err == nil {
+			if time.Since(info.ModTime()) < 7*24*time.Hour {
+				needFetch = false
+			}
+		}
+		if needFetch {
+			client := &http.Client{Timeout: 15 * time.Second}
+			resp, err := client.Get("https://discord.com/api/v9/applications/detectable")
+			if err == nil && resp.StatusCode == http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if err == nil && len(body) > 0 {
+					if parseAndSetDetectable(body) {
+						_ = os.WriteFile(cachePath, body, 0644)
+					}
+				}
+			}
+		}
+	}()
+}
+
+func detectableCachePath() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(configDir, "Moreno", "DiscordLite")
+	_ = os.MkdirAll(dir, 0700)
+	return filepath.Join(dir, "detectable.json"), nil
+}
+
+type detectableApp struct {
+	ID          string `json:"id"`
 	Name        string `json:"name"`
-	Path        string `json:"path"`
-	WindowTitle string `json:"windowTitle"`
+	Executables []struct {
+		Name string `json:"name"`
+		OS   string `json:"os"`
+	} `json:"executables"`
+}
+
+func parseAndSetDetectable(data []byte) bool {
+	var apps []detectableApp
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return false
+	}
+	m := make(map[string]knownGame, len(apps)*2)
+	for _, app := range apps {
+		for _, exe := range app.Executables {
+			if exe.OS == "win32" || exe.OS == "" {
+				base := strings.ToLower(filepath.Base(strings.ReplaceAll(exe.Name, "/", "\\")))
+				if base != "" {
+					m[base] = knownGame{ApplicationID: app.ID, Name: app.Name}
+				}
+			}
+		}
+	}
+	cachedDetectableMu.Lock()
+	cachedDetectable = m
+	cachedDetectableMu.Unlock()
+	return true
 }
 
 type gameActivityEntry struct {
@@ -206,7 +329,6 @@ func gameDisplayName(value string) string {
 }
 
 func (d *discordApp) gameActivityState() (gameActivityState, error) {
-	refreshGameActivityProcesses()
 	gameActivityMu.Lock()
 	defer gameActivityMu.Unlock()
 	config, err := loadGameActivityConfig()

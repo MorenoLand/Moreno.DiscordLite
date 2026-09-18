@@ -204,6 +204,21 @@ func (d *discordApp) respond(window application.Window, id string, value any, er
 	window.ExecJS("window.__vcWailsResponse(" + string(encoded) + ")")
 }
 
+func (d *discordApp) setRPCActivity(socketID string, pid any, activity any) {
+	if d == nil || d.window == nil {
+		return
+	}
+	payload := map[string]any{
+		"socketId": socketID,
+		"pid":      pid,
+		"activity": activity,
+	}
+	encoded, err := json.Marshal(payload)
+	if err == nil {
+		d.window.ExecJS(fmt.Sprintf("if(window.__vcSetRPCActivity)window.__vcSetRPCActivity(%s);", string(encoded)))
+	}
+}
+
 func (d *discordApp) allowDownload(downloadURL string) bool {
 	now := time.Now()
 	d.recentMu.Lock()
@@ -499,9 +514,8 @@ apply();
 
 func main() {
 	checkAndUpdateVencord()
-	startDiscordRPCBridge()
+	initDetectableCache()
 	discord := &discordApp{recentDownload: make(map[string]time.Time)}
-	discord.startGameActivityObserver()
 	app := application.New(application.Options{
 		Name:        "Discord",
 		Description: "Unofficial Discord desktop wrapper",
@@ -559,6 +573,8 @@ func main() {
 		InitialPosition: application.WindowCentered,
 	})
 	discord.window = window
+	startDiscordRPCBridge(discord)
+	discord.startGameActivityObserver()
 	window.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(_ *application.WindowEvent) {
 		discord.injectPage(window)
 	})

@@ -26,6 +26,7 @@ var (
 	process32Next             = kernel32.NewProc("Process32NextW")
 	openProcess               = kernel32.NewProc("OpenProcess")
 	queryFullProcessImageName = kernel32.NewProc("QueryFullProcessImageNameW")
+	getProcessTimes           = kernel32.NewProc("GetProcessTimes")
 	closeHandle               = kernel32.NewProc("CloseHandle")
 	enumWindows               = user32.NewProc("EnumWindows")
 	openInputDesktop          = user32.NewProc("OpenInputDesktop")
@@ -67,21 +68,35 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 	first, _, _ := process32First.Call(snapshot, uintptr(unsafe.Pointer(&entry)))
 	for first != 0 {
 		pid := entry.ProcessID
-		pathName := processPath(pid)
+		pathName, startTime := processPathAndStartTime(pid)
 		name := filepath.Base(pathName)
 		normPath := normalizeGamePath(pathName)
 		if pid != 0 && pid != currentPID && normPath != "" && !ignoredGameProcess(name) {
 			title := windows[pid]
 			isCandidate := candidates[normPath]
 			isLikely := likelyGamePath(pathName)
-			if isCandidate || (isLikely && title != "") {
+			known, isKnown := resolveKnownGame(name)
+			if isCandidate || isKnown || (isLikely && title != "") {
 				display := gameDisplayName(name)
-				if title != "" && !isCandidate {
+				if isKnown && known.Name != "" {
+					display = known.Name
+				} else if title != "" && !isCandidate {
 					display = title
+				}
+				appID := "0"
+				if isKnown && known.ApplicationID != "" {
+					appID = known.ApplicationID
 				}
 				existing, exists := byPath[normPath]
 				if !exists || (existing.WindowTitle == "" && title != "") {
-					byPath[normPath] = gameProcess{PID: pid, Name: display, Path: pathName, WindowTitle: title}
+					byPath[normPath] = gameProcess{
+						PID:           pid,
+						Name:          display,
+						Path:          pathName,
+						WindowTitle:   title,
+						Start:         startTime,
+						ApplicationID: appID,
+					}
 				}
 			}
 		}
@@ -106,19 +121,25 @@ func likelyGamePath(pathName string) bool {
 	return false
 }
 
-func processPath(pid uint32) string {
+func processPathAndStartTime(pid uint32) (string, int64) {
 	handle, _, _ := openProcess.Call(processQueryLimitedInformation, 0, uintptr(pid))
 	if handle == 0 {
-		return ""
+		return "", 0
 	}
 	defer closeHandle.Call(handle)
 	buffer := make([]uint16, 32768)
 	length := uint32(len(buffer))
 	result, _, _ := queryFullProcessImageName.Call(handle, 0, uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&length)))
 	if result == 0 || length == 0 {
-		return ""
+		return "", 0
 	}
-	return syscall.UTF16ToString(buffer[:length])
+	path := syscall.UTF16ToString(buffer[:length])
+	var creation, exit, kernel, user syscall.Filetime
+	var startMs int64
+	if ret, _, _ := getProcessTimes.Call(handle, uintptr(unsafe.Pointer(&creation)), uintptr(unsafe.Pointer(&exit)), uintptr(unsafe.Pointer(&kernel)), uintptr(unsafe.Pointer(&user))); ret != 0 {
+		startMs = creation.Nanoseconds() / 1e6
+	}
+	return path, startMs
 }
 
 var (

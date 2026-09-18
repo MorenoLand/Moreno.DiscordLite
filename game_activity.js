@@ -12,7 +12,231 @@ function text(value){return document.createTextNode(value||'');}
 function button(label,action,extra){var node=document.createElement('button');node.type='button';node.textContent=label;node.dataset.vcAction=action;if(extra)node.className=extra;return node;}
 function row(name,detail,path,remove){var row=document.createElement('div');row.className='vc-game-row';var main=document.createElement('div');main.className='vc-game-row-main';var title=document.createElement('div');title.className='vc-game-name';title.textContent=name;var sub=document.createElement('div');sub.className='vc-game-detail';sub.textContent=detail||path;sub.title=path;main.append(title,sub);row.append(main);if(remove){var action=button('Remove','remove','vc-danger');action.dataset.vcPath=path;row.append(action);}return row;}
 function render(data){var panel=document.getElementById(panelId);if(!panel)return;panel.innerHTML='';var heading=document.createElement('h1');heading.textContent='Registered Games';var intro=document.createElement('p');intro.textContent='DiscordLite watches visible Windows applications and can show them as your activity. Add an executable manually when detection does not find it.';var actions=document.createElement('div');actions.className='vc-game-actions';var pathInput=document.createElement('input');pathInput.type='text';pathInput.placeholder='Executable path (optional)';pathInput.dataset.vcGamePath='1';actions.append(pathInput,button('Browse','add','vc-primary'),button('Add','add-path'),button('Refresh','refresh'));var toggleLabel=document.createElement('label');toggleLabel.className='vc-game-toggle';var toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=!!data.detectionEnabled;toggle.dataset.vcAction='toggle';toggleLabel.append(toggle,text('Enable game detection'));panel.append(heading,intro,actions,toggleLabel);var currentHeading=document.createElement('h2');currentHeading.textContent='Running now';panel.append(currentHeading);var running=data.runningGames||[];if(!running.length){var empty=document.createElement('div');empty.className='vc-game-empty';empty.textContent=data.detectionEnabled?'No visible games detected.':'Game detection is disabled.';panel.append(empty);}else{running.forEach(function(game){panel.append(row(game.name,game.windowTitle,game.path,false));});}var seenHeading=document.createElement('h2');seenHeading.textContent='Games seen';panel.append(seenHeading);var seen=data.gamesSeen||[];if(!seen.length){var emptySeen=document.createElement('div');emptySeen.className='vc-game-empty';emptySeen.textContent='No games have been registered yet.';panel.append(emptySeen);}else{seen.forEach(function(game){panel.append(row(game.name,game.source==='manual'?'Added manually':'Detected',game.path,true));});}}
-window.__vcGameActivityApply=function(data){loading=false;render(data);};
+function getFluxDispatcher(){
+try{
+if(window.Vencord&&window.Vencord.Webpack){
+if(window.Vencord.Webpack.Common&&window.Vencord.Webpack.Common.FluxDispatcher)return window.Vencord.Webpack.Common.FluxDispatcher;
+if(typeof window.Vencord.Webpack.findByProps==='function'){
+var d=window.Vencord.Webpack.findByProps('dispatch','subscribe');
+if(d&&typeof d.dispatch==='function')return d;
+}
+}
+}catch(e){}
+return null;
+}
+var KNOWN_GAMES={
+'wow.exe':{id:'356875762940379136',name:'World of Warcraft'},
+'wowclassic.exe':{id:'356875762940379136',name:'World of Warcraft'},
+'wowt.exe':{id:'356875762940379136',name:'World of Warcraft'},
+'wowb.exe':{id:'356875762940379136',name:'World of Warcraft'},
+'league of legends.exe':{id:'401518687463948290',name:'League of Legends'},
+'valorant.exe':{id:'700144211132645406',name:'VALORANT'},
+'overwatch.exe':{id:'356867200780468224',name:'Overwatch'},
+'csgo.exe':{id:'738864303494791248',name:'Counter-Strike 2'},
+'cs2.exe':{id:'738864303494791248',name:'Counter-Strike 2'},
+'dota2.exe':{id:'738864293411684352',name:'Dota 2'},
+'gta5.exe':{id:'436993026818867200',name:'Grand Theft Auto V'},
+'minecraft.exe':{id:'356875127150903296',name:'Minecraft'},
+'javaw.exe':{id:'356875127150903296',name:'Minecraft'},
+'rocketleague.exe':{id:'356877028164632576',name:'Rocket League'},
+'fortniteclient-win64-shipping.exe':{id:'432980957394370572',name:'Fortnite'},
+'genshinimpact.exe':{id:'762434991303950386',name:'Genshin Impact'},
+'starrail.exe':{id:'1100344445853245480',name:'Honkai: Star Rail'},
+'ffxiv_dx11.exe':{id:'468936993781252096',name:'FINAL FANTASY XIV'},
+'r5apex.exe':{id:'542385150820417537',name:'Apex Legends'}
+};
+var dispatchQueue=[];
+var isProcessingQueue=false;
+function queueDispatch(dispatcher,payload){
+dispatchQueue.push({dispatcher:dispatcher,payload:payload});
+processDispatchQueue();
+}
+function processDispatchQueue(){
+if(isProcessingQueue)return;
+if(dispatchQueue.length===0)return;
+var next=dispatchQueue[0];
+var dispatcher=next.dispatcher||getFluxDispatcher();
+if(!dispatcher){
+setTimeout(processDispatchQueue,100);
+return;
+}
+if(typeof dispatcher.isDispatching==='function'&&dispatcher.isDispatching()){
+setTimeout(processDispatchQueue,25);
+return;
+}
+isProcessingQueue=true;
+dispatchQueue.shift();
+try{
+dispatcher.dispatch(next.payload);
+}catch(err){
+console.warn('[DiscordLite] Dispatch failed:',err);
+}finally{
+isProcessingQueue=false;
+}
+if(dispatchQueue.length>0){
+setTimeout(processDispatchQueue,25);
+}
+}
+var detectableExes=null,detectablePromise=null;
+function loadDetectableApps(){
+if(detectableExes)return Promise.resolve(detectableExes);
+if(detectablePromise)return detectablePromise;
+detectablePromise=fetch('/api/v9/applications/detectable')
+.then(function(r){return r.ok?r.json():[];})
+.then(function(apps){
+var map=new Map();
+if(Array.isArray(apps)){
+for(var i=0;i<apps.length;i++){
+var app=apps[i];
+if(app&&app.executables){
+for(var j=0;j<app.executables.length;j++){
+var item=app.executables[j];
+if(item&&item.name){
+var parts=item.name.split('/');
+var exe=parts[parts.length-1].toLowerCase();
+if(!map.has(exe))map.set(exe,app);
+}
+}
+}
+}
+}
+detectableExes=map;
+return map;
+})
+.catch(function(err){
+console.warn('[DiscordLite] Failed to load detectable applications:',err);
+detectablePromise=null;
+return null;
+});
+return detectablePromise;
+}
+var activePresenceKey=null,pendingPresenceData=null,lastAppliedData=null;
+var pendingRPCActivities={};
+function hookDispatcher(d){
+if(!d||d.__vcPresenceHooked)return;
+d.__vcPresenceHooked=true;
+function onOpen(){
+activePresenceKey=null;
+if(lastAppliedData)updateDetectedGamePresence(lastAppliedData);
+}
+d.subscribe('CONNECTION_OPEN',onOpen);
+d.subscribe('POST_CONNECTION_OPEN',onOpen);
+}
+function updateDetectedGamePresence(data){
+if(!data)return;
+var dispatcher=getFluxDispatcher();
+if(!dispatcher){
+pendingPresenceData=data;
+return;
+}
+hookDispatcher(dispatcher);
+var running=(data.detectionEnabled&&data.runningGames)||[];
+if(!running.length){
+if(activePresenceKey!==null){
+activePresenceKey=null;
+queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null});
+queueDispatch(dispatcher,{type:'RUNNING_GAME_SET_DEBUG_GAME',game:null});
+}
+return;
+}
+var primary=running[0];
+var exeName=primary.path?primary.path.replace(/^.*[\\\/]/,'').toLowerCase():'';
+var known=KNOWN_GAMES[exeName];
+var app=detectableExes?detectableExes.get(exeName):null;
+var appId=primary.applicationId||(app&&app.id)||(known&&known.id)||'0';
+var gameName=(data.overrides&&data.overrides[primary.path.toLowerCase()])||(app&&app.name)||(known&&known.name)||primary.name;
+var presenceKey=primary.path+'|'+gameName+'|'+appId;
+if(activePresenceKey===presenceKey)return;
+activePresenceKey=presenceKey;
+var activity={
+application_id:appId,
+name:gameName,
+type:0,
+flags:1,
+platform:'desktop',
+timestamps:{
+start:primary.start||Date.now()
+}
+};
+queueDispatch(dispatcher,{
+type:'LOCAL_ACTIVITY_UPDATE',
+socketId:'GameActivity',
+pid:primary.pid||0,
+applicationId:appId,
+activity:activity
+});
+queueDispatch(dispatcher,{
+type:'RUNNING_GAME_SET_DEBUG_GAME',
+game:{
+id:appId,
+name:gameName,
+exePath:primary.path,
+exeName:exeName,
+cmdLine:primary.path,
+pid:primary.pid,
+start:primary.start||Date.now(),
+isLauncher:false,
+hidden:false,
+elevated:false,
+windowHandle:null
+}
+});
+}
+function applyRPCActivity(dispatcher,socketId,activity,pid){
+if(activity){
+var parts=socketId.split(':');
+var appId=activity.application_id||parts[1]||'0';
+if(!activity.application_id)activity.application_id=appId;
+if(typeof activity.type!=='number')activity.type=0;
+if(typeof activity.flags!=='number')activity.flags=1;
+if(!activity.platform)activity.platform='desktop';
+queueDispatch(dispatcher,{
+type:'LOCAL_ACTIVITY_UPDATE',
+socketId:socketId,
+applicationId:appId,
+pid:typeof pid==='number'?pid:0,
+activity:activity
+});
+}else{
+queueDispatch(dispatcher,{
+type:'LOCAL_ACTIVITY_UPDATE',
+socketId:socketId,
+activity:null
+});
+}
+}
+function flushPendingPresence(){
+var d=getFluxDispatcher();
+if(!d)return;
+hookDispatcher(d);
+if(pendingPresenceData){
+var pd=pendingPresenceData;
+pendingPresenceData=null;
+updateDetectedGamePresence(pd);
+}
+for(var socketId in pendingRPCActivities){
+var item=pendingRPCActivities[socketId];
+delete pendingRPCActivities[socketId];
+if(item)applyRPCActivity(d,socketId,item.activity,item.pid);
+}
+}
+window.__vcGameActivityApply=function(data){
+loading=false;
+lastAppliedData=data;
+render(data);
+loadDetectableApps().finally(function(){
+updateDetectedGamePresence(data);
+});
+};
+window.__vcSetRPCActivity=function(payload){
+if(!payload||!payload.socketId)return;
+var dispatcher=getFluxDispatcher();
+if(!dispatcher){
+pendingRPCActivities[payload.socketId]={activity:payload.activity,pid:payload.pid};
+return;
+}
+applyRPCActivity(dispatcher,payload.socketId,payload.activity,payload.pid);
+};
 function refresh(){if(loading)return;loading=true;var panel=document.getElementById(panelId),initial=window.__vcGameActivityInitial||{detectionEnabled:true,runningGames:[],gamesSeen:[],overrides:{}};if(panel&&!panel.children.length)render(initial);var timeout=setTimeout(function(){loading=false;},3000);invoke('vc_game_activity').then(function(data){render(data||initial);}).catch(function(error){console.error('Game activity refresh failed',error);}).finally(function(){clearTimeout(timeout);loading=false;});}
 function close(){active=false;var item=document.getElementById(navId),panel=document.getElementById(panelId);if(item)item.classList.remove('vc-selected');if(panel)panel.style.setProperty('display','none','important');}
 function open(){active=true;var item=document.getElementById(navId),panel=document.getElementById(panelId);if(item)item.classList.add('vc-selected');if(!panel){mount();panel=document.getElementById(panelId);}if(panel){panel.style.setProperty('display','block','important');panel.style.setProperty('visibility','visible','important');panel.style.setProperty('opacity','1','important');panel.style.setProperty('pointer-events','auto','important');position(panel,panel.__vcModal);if(window.__vcGameActivityInitial)render(window.__vcGameActivityInitial);refresh();}}
@@ -29,7 +253,7 @@ document.addEventListener('change',function(event){var action=event.target.close
 window.addEventListener('resize',function(){var panel=document.getElementById(panelId);if(panel&&panel.__vcModal)position(panel,panel.__vcModal);});
 function dispose(){active=false;var panel=document.getElementById(panelId),item=document.getElementById(navId);if(panel)panel.remove();if(item)item.remove();}
 var observer=new MutationObserver(function(){if(!findContentPane()){if(document.getElementById(panelId)||document.getElementById(navId))dispose();return;}mount();});
-setInterval(function(){if(active&&!loading&&findContentPane())refresh();},2000);
-function start(){mount();observer.observe(document.documentElement,{childList:true,subtree:true});}
+setInterval(function(){if(active&&!loading&&findContentPane())refresh();flushPendingPresence();},1000);
+function start(){mount();observer.observe(document.documentElement,{childList:true,subtree:true});loadDetectableApps().finally(function(){if(window.__vcGameActivityInitial)window.__vcGameActivityApply(window.__vcGameActivityInitial);});}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
