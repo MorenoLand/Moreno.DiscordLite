@@ -58,6 +58,9 @@ var (
 
 func resolveKnownGame(exeName string) (knownGame, bool) {
 	lower := strings.ToLower(exeName)
+	if filepath.Ext(lower) == "" {
+		lower += ".exe"
+	}
 	cachedDetectableMu.RLock()
 	if cachedDetectable != nil {
 		if game, ok := cachedDetectable[lower]; ok {
@@ -297,6 +300,22 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 	if config.Overrides == nil {
 		config.Overrides = map[string]string{}
 	}
+	needsSave := false
+	for k, v := range config.Overrides {
+		if strings.ContainsAny(v, `\/`) {
+			config.Overrides[k] = gameDisplayName(v)
+			needsSave = true
+		}
+	}
+	for i := range config.GamesSeen {
+		if strings.ContainsAny(config.GamesSeen[i].Name, `\/`) {
+			config.GamesSeen[i].Name = gameDisplayName(config.GamesSeen[i].Name)
+			needsSave = true
+		}
+	}
+	if needsSave {
+		_ = saveGameActivityConfig(config)
+	}
 	return config, nil
 }
 
@@ -323,9 +342,17 @@ func normalizeGamePath(value string) string {
 func gameDisplayName(value string) string {
 	name := strings.TrimSpace(value)
 	if name == "" {
-		name = filepath.Base(value)
+		return ""
 	}
-	return strings.TrimSuffix(name, filepath.Ext(name))
+	base := filepath.Base(name)
+	if known, ok := resolveKnownGame(base); ok && known.Name != "" {
+		return known.Name
+	}
+	clean := strings.TrimSuffix(base, filepath.Ext(base))
+	if clean == "" {
+		return base
+	}
+	return clean
 }
 
 func (d *discordApp) gameActivityState() (gameActivityState, error) {
@@ -409,8 +436,8 @@ func (d *discordApp) addGameActivity(window application.Window, args bridgeGameA
 		return gameActivityState{}, err
 	}
 	id := normalizeGamePath(pathName)
-	name := gameDisplayName(args.Name)
-	if args.Name == "" {
+	name := strings.TrimSpace(args.Name)
+	if name == "" || strings.ContainsAny(name, `\/`) {
 		name = gameDisplayName(pathName)
 	}
 	config.Overrides[id] = name

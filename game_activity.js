@@ -11,7 +11,7 @@ function position(panel,modal){panel.style.setProperty('z-index','2147483647','i
 function text(value){return document.createTextNode(value||'');}
 function button(label,action,extra){var node=document.createElement('button');node.type='button';node.textContent=label;node.dataset.vcAction=action;if(extra)node.className=extra;return node;}
 function row(name,detail,path,remove){var row=document.createElement('div');row.className='vc-game-row';var main=document.createElement('div');main.className='vc-game-row-main';var title=document.createElement('div');title.className='vc-game-name';title.textContent=name;var sub=document.createElement('div');sub.className='vc-game-detail';sub.textContent=detail||path;sub.title=path;main.append(title,sub);row.append(main);if(remove){var action=button('Remove','remove','vc-danger');action.dataset.vcPath=path;row.append(action);}return row;}
-function render(data){var panel=document.getElementById(panelId);if(!panel)return;panel.innerHTML='';var heading=document.createElement('h1');heading.textContent='Registered Games';var intro=document.createElement('p');intro.textContent='DiscordLite watches visible Windows applications and can show them as your activity. Add an executable manually when detection does not find it.';var actions=document.createElement('div');actions.className='vc-game-actions';var pathInput=document.createElement('input');pathInput.type='text';pathInput.placeholder='Executable path (optional)';pathInput.dataset.vcGamePath='1';actions.append(pathInput,button('Browse','add','vc-primary'),button('Add','add-path'),button('Refresh','refresh'));var toggleLabel=document.createElement('label');toggleLabel.className='vc-game-toggle';var toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=!!data.detectionEnabled;toggle.dataset.vcAction='toggle';toggleLabel.append(toggle,text('Enable game detection'));panel.append(heading,intro,actions,toggleLabel);var currentHeading=document.createElement('h2');currentHeading.textContent='Running now';panel.append(currentHeading);var running=data.runningGames||[];if(!running.length){var empty=document.createElement('div');empty.className='vc-game-empty';empty.textContent=data.detectionEnabled?'No visible games detected.':'Game detection is disabled.';panel.append(empty);}else{running.forEach(function(game){panel.append(row(game.name,game.windowTitle,game.path,false));});}var seenHeading=document.createElement('h2');seenHeading.textContent='Games seen';panel.append(seenHeading);var seen=data.gamesSeen||[];if(!seen.length){var emptySeen=document.createElement('div');emptySeen.className='vc-game-empty';emptySeen.textContent='No games have been registered yet.';panel.append(emptySeen);}else{seen.forEach(function(game){panel.append(row(game.name,game.source==='manual'?'Added manually':'Detected',game.path,true));});}}
+function render(data){var panel=document.getElementById(panelId);if(!panel)return;panel.innerHTML='';var heading=document.createElement('h1');heading.textContent='Registered Games';var intro=document.createElement('p');intro.textContent='DiscordLite watches visible Windows applications and can show them as your activity. Add an executable manually when detection does not find it.';var actions=document.createElement('div');actions.className='vc-game-actions';var pathInput=document.createElement('input');pathInput.type='text';pathInput.placeholder='Executable path (optional)';pathInput.dataset.vcGamePath='1';actions.append(pathInput,button('Browse','add','vc-primary'),button('Add','add-path'),button('Refresh','refresh'));var toggleLabel=document.createElement('label');toggleLabel.className='vc-game-toggle';var toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=!!data.detectionEnabled;toggle.dataset.vcAction='toggle';toggleLabel.append(toggle,text('Enable game detection'));panel.append(heading,intro,actions,toggleLabel);var currentHeading=document.createElement('h2');currentHeading.textContent='Running now';panel.append(currentHeading);var running=data.runningGames||[];if(!running.length){var empty=document.createElement('div');empty.className='vc-game-empty';empty.textContent=data.detectionEnabled?'No visible games detected.':'Game detection is disabled.';panel.append(empty);}else{running.forEach(function(game){panel.append(row(resolveDisplayName(game.name,game.path,data.overrides),game.windowTitle,game.path,false));});}var seenHeading=document.createElement('h2');seenHeading.textContent='Games seen';panel.append(seenHeading);var seen=data.gamesSeen||[];if(!seen.length){var emptySeen=document.createElement('div');emptySeen.className='vc-game-empty';emptySeen.textContent='No games have been registered yet.';panel.append(emptySeen);}else{seen.forEach(function(game){panel.append(row(resolveDisplayName(game.name,game.path,data.overrides),game.source==='manual'?'Added manually':'Detected',game.path,true));});}}
 function getFluxDispatcher(){
 try{
 if(window.Vencord&&window.Vencord.Webpack){
@@ -45,6 +45,17 @@ var KNOWN_GAMES={
 'ffxiv_dx11.exe':{id:'468936993781252096',name:'FINAL FANTASY XIV'},
 'r5apex.exe':{id:'542385150820417537',name:'Apex Legends'}
 };
+function resolveDisplayName(name,path,overrides){
+var id=path?path.toLowerCase():'';
+var raw=(overrides&&overrides[id])||name||'';
+if(raw&&!/[\\\/]/.test(raw))return raw;
+var exe=(path||raw).replace(/^.*[\\\/]/,'').toLowerCase();
+var known=KNOWN_GAMES[exe];
+if(known&&known.name)return known.name;
+var app=detectableExes?detectableExes.get(exe):null;
+if(app&&app.name)return app.name;
+return exe.replace(/\.[^.]+$/,'')||raw;
+}
 var dispatchQueue=[];
 var isProcessingQueue=false;
 function queueDispatch(dispatcher,payload){
@@ -144,7 +155,7 @@ var exeName=primary.path?primary.path.replace(/^.*[\\\/]/,'').toLowerCase():'';
 var known=KNOWN_GAMES[exeName];
 var app=detectableExes?detectableExes.get(exeName):null;
 var appId=primary.applicationId||(app&&app.id)||(known&&known.id)||'0';
-var gameName=(data.overrides&&data.overrides[primary.path.toLowerCase()])||(app&&app.name)||(known&&known.name)||primary.name;
+var gameName=resolveDisplayName(primary.name,primary.path,data.overrides);
 var presenceKey=primary.path+'|'+gameName+'|'+appId;
 if(activePresenceKey===presenceKey)return;
 activePresenceKey=presenceKey;
