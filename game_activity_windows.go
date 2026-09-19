@@ -36,6 +36,7 @@ var (
 	getWindowThreadProcessID  = user32.NewProc("GetWindowThreadProcessId")
 	getWindowTextLength       = user32.NewProc("GetWindowTextLengthW")
 	getWindowText             = user32.NewProc("GetWindowTextW")
+	getForegroundWindow       = user32.NewProc("GetForegroundWindow")
 )
 
 type processEntry32 struct {
@@ -70,40 +71,45 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 		pid := entry.ProcessID
 		pathName, startTime := processPathAndStartTime(pid)
 		name := filepath.Base(pathName)
+		if name == "." || name == "" {
+			name = syscall.UTF16ToString(entry.Executable[:])
+		}
 		normPath := normalizeGamePath(pathName)
 		if pid != 0 && pid != currentPID && normPath != "" && !ignoredGameProcess(name) {
 			title := windows[pid]
-			isCandidate := candidates[normPath]
-			isLikely := likelyGamePath(pathName)
-			known, isKnown := resolveKnownGame(name)
-			if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {
-				if strings.Contains(strings.ToLower(title), "minecraft") || strings.Contains(strings.ToLower(pathName), `\.minecraft\`) {
-					known = knownGame{ApplicationID: "356875127150903296", Name: "Minecraft"}
-					isKnown = true
-				} else {
-					isKnown = false
+			if title != "" {
+				isCandidate := candidates[normPath]
+				isLikely := likelyGamePath(pathName)
+				known, isKnown := resolveKnownGame(name)
+				if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {
+					if strings.Contains(strings.ToLower(title), "minecraft") || strings.Contains(strings.ToLower(pathName), `\.minecraft\`) {
+						known = knownGame{ApplicationID: "356875762940379136", Name: "Minecraft"}
+						isKnown = true
+					} else {
+						isKnown = false
+					}
 				}
-			}
-			if isCandidate || isKnown || (isLikely && title != "") {
-				display := gameDisplayName(name)
-				if isKnown && known.Name != "" {
-					display = known.Name
-				} else if title != "" && !isCandidate {
-					display = title
-				}
-				appID := "0"
-				if isKnown && known.ApplicationID != "" {
-					appID = known.ApplicationID
-				}
-				existing, exists := byPath[normPath]
-				if !exists || (existing.WindowTitle == "" && title != "") {
-					byPath[normPath] = gameProcess{
-						PID:           pid,
-						Name:          display,
-						Path:          pathName,
-						WindowTitle:   title,
-						Start:         startTime,
-						ApplicationID: appID,
+				if isCandidate || isKnown || isLikely {
+					display := gameDisplayName(name)
+					if isKnown && known.Name != "" {
+						display = known.Name
+					} else if title != "" && !isCandidate {
+						display = title
+					}
+					appID := "0"
+					if isKnown && known.ApplicationID != "" {
+						appID = known.ApplicationID
+					}
+					existing, exists := byPath[normPath]
+					if !exists || (existing.WindowTitle == "" && title != "") {
+						byPath[normPath] = gameProcess{
+							PID:           pid,
+							Name:          display,
+							Path:          pathName,
+							WindowTitle:   title,
+							Start:         startTime,
+							ApplicationID: appID,
+						}
 					}
 				}
 			}
@@ -115,7 +121,19 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 	for _, p := range byPath {
 		result = append(result, p)
 	}
-	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name) })
+	fgPID := foregroundProcessID()
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].PID == fgPID && result[j].PID != fgPID {
+			return true
+		}
+		if result[j].PID == fgPID && result[i].PID != fgPID {
+			return false
+		}
+		if result[i].Start != result[j].Start {
+			return result[i].Start > result[j].Start
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
 	return result, nil
 }
 
@@ -195,11 +213,12 @@ func visibleWindowTitles() map[uint32]string {
 	return titles
 }
 
-func ignoredGameProcess(name string) bool {
-	switch strings.ToLower(name) {
-	case "discord.exe", "discordcanary.exe", "discordptb.exe", "msedgewebview2.exe", "crashpad_handler.exe", "explorer.exe", "dwm.exe", "applicationframehost.exe", "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe", "textinputhost.exe", "taskmgr.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "conhost.exe":
-		return true
-	default:
-		return false
+func foregroundProcessID() uint32 {
+	hwnd, _, _ := getForegroundWindow.Call()
+	if hwnd == 0 {
+		return 0
 	}
+	var pid uint32
+	getWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	return pid
 }

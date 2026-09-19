@@ -234,6 +234,9 @@ func refreshGameActivityProcesses() []gameProcess {
 		if config.IgnoredGames != nil && config.IgnoredGames[entryID] {
 			continue
 		}
+		if ignoredGameProcess(filepath.Base(entry.Path)) {
+			continue
+		}
 		if entry.Source == "manual" || config.Overrides[entryID] != "" || likelyGamePath(entry.Path) {
 			candidates = append(candidates, entry.Path)
 		}
@@ -351,6 +354,10 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 			continue
 		}
 		exe := strings.ToLower(filepath.Base(entry.Path))
+		if ignoredGameProcess(exe) {
+			needsSave = true
+			continue
+		}
 		if (exe == "javaw.exe" || exe == "java.exe") && entry.Name == "Minecraft" && entry.Source == "detected" {
 			needsSave = true
 			continue
@@ -402,6 +409,18 @@ func gameDisplayName(value string) string {
 		return base
 	}
 	return clean
+}
+
+func ignoredGameProcess(name string) bool {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "discord.exe", "discordcanary.exe", "discordptb.exe", "msedgewebview2.exe", "crashpad_handler.exe", "explorer.exe", "dwm.exe", "applicationframehost.exe", "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe", "textinputhost.exe", "taskmgr.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "conhost.exe", "git.exe", "gh.exe", "node.exe", "go.exe", "python.exe", "bash.exe", "sh.exe", "wt.exe", "wsl.exe", "wslhost.exe":
+		return true
+	}
+	if strings.Contains(lower, "crashhandler") || strings.Contains(lower, "crashreporter") || strings.Contains(lower, "crashpad") || strings.Contains(lower, "crashmailer") || strings.Contains(lower, "werfault") || strings.Contains(lower, "errorreport") || strings.HasPrefix(lower, "unins") || strings.Contains(lower, "setup") || strings.Contains(lower, "installer") {
+		return true
+	}
+	return false
 }
 
 func (d *discordApp) gameActivityState() (gameActivityState, error) {

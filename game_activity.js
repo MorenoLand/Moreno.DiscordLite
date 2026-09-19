@@ -495,13 +495,13 @@ timestamps:{
 start:(typeof primary.start==='number'&&primary.start>0)?primary.start:Date.now()
 }
 };
-if(appId&&appId!=='0')activity.application_id=appId;
+activity.application_id=(appId&&appId!=='0')?appId:'0';
 var payload={
 type:'LOCAL_ACTIVITY_UPDATE',
 socketId:'GameActivity',
-activity:activity
+activity:activity,
+applicationId:activity.application_id
 };
-if(appId&&appId!=='0')payload.applicationId=appId;
 if(typeof primary.pid==='number'&&primary.pid>0)payload.pid=primary.pid;
 queueDispatch(dispatcher,payload);
 }
