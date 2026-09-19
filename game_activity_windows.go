@@ -37,6 +37,8 @@ var (
 	getWindowTextLength       = user32.NewProc("GetWindowTextLengthW")
 	getWindowText             = user32.NewProc("GetWindowTextW")
 	getForegroundWindow       = user32.NewProc("GetForegroundWindow")
+	openDesktop               = user32.NewProc("OpenDesktopW")
+	isIconic                  = user32.NewProc("IsIconic")
 )
 
 type processEntry32 struct {
@@ -77,39 +79,41 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 		normPath := normalizeGamePath(pathName)
 		if pid != 0 && pid != currentPID && normPath != "" && !ignoredGameProcess(name) {
 			title := windows[pid]
-			if title != "" {
-				isCandidate := candidates[normPath]
-				isLikely := likelyGamePath(pathName)
-				known, isKnown := resolveKnownGame(name)
-				if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {
-					if strings.Contains(strings.ToLower(title), "minecraft") || strings.Contains(strings.ToLower(pathName), `\.minecraft\`) {
-						known = knownGame{ApplicationID: "356875762940379136", Name: "Minecraft"}
-						isKnown = true
-					} else {
-						isKnown = false
-					}
+			isCandidate := candidates[normPath]
+			isLikely := likelyGamePath(pathName)
+			known, isKnown := resolveKnownGame(name)
+			if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {
+				if strings.Contains(strings.ToLower(title), "minecraft") || strings.Contains(strings.ToLower(pathName), `\.minecraft\`) {
+					known = knownGame{ApplicationID: "356875762940379136", Name: "Minecraft"}
+					isKnown = true
+				} else {
+					isKnown = false
 				}
-				if isCandidate || isKnown || isLikely {
-					display := gameDisplayName(name)
-					if isKnown && known.Name != "" {
-						display = known.Name
-					} else if title != "" && !isCandidate {
-						display = title
-					}
-					appID := "0"
-					if isKnown && known.ApplicationID != "" {
-						appID = known.ApplicationID
-					}
-					existing, exists := byPath[normPath]
-					if !exists || (existing.WindowTitle == "" && title != "") {
-						byPath[normPath] = gameProcess{
-							PID:           pid,
-							Name:          display,
-							Path:          pathName,
-							WindowTitle:   title,
-							Start:         startTime,
-							ApplicationID: appID,
-						}
+			}
+			if isCandidate || isKnown || (isLikely && title != "") {
+				display := gameDisplayName(name)
+				if isKnown && known.Name != "" {
+					display = known.Name
+				} else if title != "" && !isCandidate {
+					display = title
+				}
+				appID := "0"
+				if isKnown && known.ApplicationID != "" {
+					appID = known.ApplicationID
+				}
+				windowTitle := title
+				if windowTitle == "" {
+					windowTitle = display
+				}
+				existing, exists := byPath[normPath]
+				if !exists || (existing.WindowTitle == "" && title != "") {
+					byPath[normPath] = gameProcess{
+						PID:           pid,
+						Name:          display,
+						Path:          pathName,
+						WindowTitle:   windowTitle,
+						Start:         startTime,
+						ApplicationID: appID,
 					}
 				}
 			}
@@ -176,7 +180,8 @@ var (
 
 func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 	visible, _, _ := isWindowVisible.Call(hwnd)
-	if visible == 0 {
+	iconic, _, _ := isIconic.Call(hwnd)
+	if visible == 0 && iconic == 0 {
 		return 1
 	}
 	var pid uint32
@@ -207,6 +212,11 @@ func visibleWindowTitles() map[uint32]string {
 	if inputDesk != 0 {
 		enumDesktopWindows.Call(inputDesk, enumWindowsCallback, 0)
 		closeDesktop.Call(inputDesk)
+	}
+	defDesk, _, _ := openDesktop.Call(uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Default"))), 0, 0, 0x0040)
+	if defDesk != 0 {
+		enumDesktopWindows.Call(defDesk, enumWindowsCallback, 0)
+		closeDesktop.Call(defDesk)
 	}
 	titles := currentEnumTitles
 	currentEnumTitles = nil

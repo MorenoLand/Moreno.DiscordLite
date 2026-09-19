@@ -638,6 +638,7 @@ if(panel)panel.style.setProperty('display','none','important');
 }
 function open(){
 active=true;
+lastRenderedSignature='';
 var item=document.getElementById(navId),panel=document.getElementById(panelId);
 if(!item){
 mount();

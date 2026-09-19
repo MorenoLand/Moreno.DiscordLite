@@ -384,7 +384,12 @@ func saveGameActivityConfig(config gameActivityConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, data, 0600)
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	_ = os.Remove(filePath)
+	return os.Rename(tmpPath, filePath)
 }
 
 func normalizeGamePath(value string) string {
