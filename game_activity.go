@@ -192,17 +192,31 @@ var gameActivityRuntimeMu sync.RWMutex
 var gameActivityRunning []gameProcess
 
 func (d *discordApp) startGameActivityObserver() {
-	go func() {
-		for {
-			if d.window != nil {
-				if state, err := d.gameActivityState(); err == nil {
-					encoded, _ := json.Marshal(state)
-					d.window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+	d.gameActivityOnce.Do(func() {
+		go func() {
+			wasRunning := false
+			for {
+				if d.window != nil {
+					if state, err := d.gameActivityState(); err == nil {
+						encoded, _ := json.Marshal(state)
+						isRunning := len(state.RunningGames) > 0
+						processExit := wasRunning && !isRunning
+						application.InvokeAsync(func() {
+							if d.window == nil {
+								return
+							}
+							d.window.ExecJS("if(window.__vcGameActivityApply)window.__vcGameActivityApply(" + string(encoded) + ");")
+							if processExit {
+								d.window.ExecJS("if(window.__vcGameActivityProcessExit)window.__vcGameActivityProcessExit();")
+							}
+						})
+						wasRunning = isRunning
+					}
 				}
+				time.Sleep(3 * time.Second)
 			}
-			time.Sleep(3 * time.Second)
-		}
-	}()
+		}()
+	})
 }
 
 func cachedGameActivityProcesses() []gameProcess {
@@ -243,6 +257,7 @@ func refreshGameActivityProcesses() []gameProcess {
 	}
 	running, err := enumerateGameProcesses(candidates...)
 	if err != nil {
+		setCachedGameActivityProcesses(nil)
 		return nil
 	}
 	filteredRunning := make([]gameProcess, 0, len(running))

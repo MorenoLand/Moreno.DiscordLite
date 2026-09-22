@@ -57,8 +57,13 @@ type processEntry32 struct {
 func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 	windows := visibleWindowTitles()
 	candidates := map[string]bool{}
+	candidateNames := map[string]string{}
 	for _, candidate := range candidatePaths {
-		candidates[normalizeGamePath(candidate)] = true
+		id := normalizeGamePath(candidate)
+		if id != "" {
+			candidates[id] = true
+			candidateNames[strings.ToLower(filepath.Base(candidate))] = candidate
+		}
 	}
 	snapshot, _, _ := createToolhelp32Snapshot.Call(th32csSnapProcess, 0)
 	if snapshot == 0 || snapshot == ^uintptr(0) {
@@ -77,9 +82,16 @@ func enumerateGameProcesses(candidatePaths ...string) ([]gameProcess, error) {
 			name = syscall.UTF16ToString(entry.Executable[:])
 		}
 		normPath := normalizeGamePath(pathName)
-		if pid != 0 && pid != currentPID && normPath != "" && !ignoredGameProcess(name) {
+		nameKey := strings.ToLower(name)
+		if normPath == "" {
+			if candidate, ok := candidateNames[nameKey]; ok {
+				pathName = candidate
+				normPath = normalizeGamePath(candidate)
+			}
+		}
+		if pid != 0 && pid != currentPID && name != "" && !ignoredGameProcess(name) {
 			title := windows[pid]
-			isCandidate := candidates[normPath]
+			isCandidate := candidates[normPath] || candidateNames[nameKey] != ""
 			isLikely := likelyGamePath(pathName)
 			known, isKnown := resolveKnownGame(name)
 			if strings.EqualFold(name, "javaw.exe") || strings.EqualFold(name, "java.exe") {

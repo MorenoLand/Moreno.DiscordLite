@@ -61,10 +61,11 @@ type bridgeURLArgs struct {
 }
 
 type discordApp struct {
-	app            *application.App
-	window         *application.WebviewWindow
-	recentMu       sync.Mutex
-	recentDownload map[string]time.Time
+	app              *application.App
+	window           *application.WebviewWindow
+	recentMu         sync.Mutex
+	recentDownload   map[string]time.Time
+	gameActivityOnce sync.Once
 }
 
 func showMainWindow(window application.Window) {
@@ -501,9 +502,11 @@ func (d *discordApp) injectPage(window *application.WebviewWindow) {
 	encodedGameActivity, _ := json.Marshal(initialGameActivity)
 	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"
 	css := vencordCSSInjectionScript(vencordCSS)
-	for _, script := range []string{wailsBridgeJS, resizeJS, vencordJS, spoofJS, titlebarJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, css} {
-		window.ExecJS(script)
-	}
+	window.ExecJS(pageInitializationScript(wailsBridgeJS, resizeJS, vencordJS, spoofJS, titlebarJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, css))
+}
+
+func pageInitializationScript(scripts ...string) string {
+	return "if(window===window.top&&location.hostname==='discord.com'&&!window.__vcPageScriptsInstalled){window.__vcPageScriptsInstalled=true;\n" + strings.Join(scripts, "\n") + "\n}"
 }
 
 func vencordCSSInjectionScript(css string) string {
@@ -557,7 +560,7 @@ func main() {
 	initialGameActivity, _ := discord.gameActivityState()
 	encodedGameActivity, _ := json.Marshal(initialGameActivity)
 	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"
-	initializationJS := strings.Join([]string{wailsBridgeJS, resizeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, vencordCSSInjectionScript(initialVencordCSS)}, "\n")
+	initializationJS := pageInitializationScript(wailsBridgeJS, resizeJS, titlebarJS, initialVencordJS, spoofJS, downloadJS, imageSaveJS, initialGameActivityJS, embeddedGameActivityJS, vencordCSSInjectionScript(initialVencordCSS))
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:          "main",
 		Title:         "Discord",
@@ -585,6 +588,7 @@ func main() {
 	discord.startGameActivityObserver()
 	window.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(_ *application.WindowEvent) {
 		discord.injectPage(window)
+		discord.startGameActivityObserver()
 	})
 
 	tray := app.SystemTray.New()
@@ -615,6 +619,8 @@ var pending=Object.create(null),nextId=0;
 window.__vcWailsResponse=function(message){try{var response=typeof message==='string'?JSON.parse(message):message;var item=pending[response.id];if(!item)return;delete pending[response.id];if(response.ok)item.resolve(response.result);else item.reject(new Error(response.error||'Wails request failed'));}catch(e){}};
 function invoke(method,args){return new Promise(function(resolve,reject){var id=String(++nextId);pending[id]={resolve:resolve,reject:reject};try{window._wails.invoke(JSON.stringify({id:id,method:method,args:args||{}}));}catch(e){delete pending[id];reject(e);}});}
 window.__vcWails={invoke:invoke,shell:{open:function(url){return invoke('vc_open_url',{url:url});}}};
+function ready(){if(typeof window._wails?.invoke==='function')window._wails.invoke('wails:runtime:ready');else setTimeout(ready,30);}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();
 document.addEventListener('keydown',function(e){if(e.key!=='F12'&&e.code!=='F12')return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();invoke('vc_open_devtools').catch(function(){});},true);
 })();`
 

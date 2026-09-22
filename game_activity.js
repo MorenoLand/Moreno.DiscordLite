@@ -439,7 +439,7 @@ return null;
 });
 return detectablePromise;
 }
-var activePresenceKey=null,pendingPresenceData=null,lastAppliedData=null,presenceCleared=false;
+var activePresenceKey=null,activePresenceMeta=null,pendingPresenceData=null,lastAppliedData=null,presenceCleared=false,lastRunningSignature='';
 var pendingRPCActivities={};
 function hookDispatcher(d){
 if(!d||d.__vcPresenceHooked)return;
@@ -466,14 +466,23 @@ return;
 hookDispatcher(dispatcher);
 var running=(data.detectionEnabled&&data.runningGames)||[];
 var activeGames=running.filter(function(g){return !isGameDisabled(data.disabledGames,g.path);});
+var runningSignature=running.map(function(g){return normId(g.path)+'|'+String(g.pid||'');}).sort().join(';');
+if(runningSignature!==lastRunningSignature){
+lastRunningSignature=runningSignature;
+queueDispatch(dispatcher,{type:'RUNNING_GAMES_CHANGE',games:running,detectionEnabled:!!data.detectionEnabled});
+}
 if(!activeGames.length){
-if(activePresenceKey!==null||!presenceCleared){
 activePresenceKey=null;
 presenceCleared=true;
-queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null});
+var clearPayload={type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null};
+if(activePresenceMeta){
+if(activePresenceMeta.applicationId)clearPayload.applicationId=activePresenceMeta.applicationId;
+if(typeof activePresenceMeta.pid==='number'&&activePresenceMeta.pid>0)clearPayload.pid=activePresenceMeta.pid;
+}
+queueDispatch(dispatcher,clearPayload);
 queueDispatch(dispatcher,{type:'RPC_APP_DISCONNECTED',socketId:'GameActivity'});
 queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',activity:null});
-}
+activePresenceMeta=null;
 return;
 }
 presenceCleared=false;
@@ -503,6 +512,7 @@ activity:activity,
 applicationId:activity.application_id
 };
 if(typeof primary.pid==='number'&&primary.pid>0)payload.pid=primary.pid;
+activePresenceMeta={applicationId:activity.application_id,pid:payload.pid||0};
 queueDispatch(dispatcher,payload);
 }
 function applyRPCActivity(dispatcher,socketId,activity,pid){
@@ -547,13 +557,31 @@ delete pendingRPCActivities[socketId];
 if(item)applyRPCActivity(d,socketId,item.activity,item.pid);
 }
 }
+window.__vcGameActivityProcessExit=function(){
+var data=lastAppliedData||window.__vcGameActivityInitial||{detectionEnabled:true,runningGames:[],gamesSeen:[],overrides:{}};
+data.runningGames=[];
+lastAppliedData=data;
+lastRunningSignature='';
+activePresenceKey=null;
+activePresenceMeta=null;
+presenceCleared=true;
+var dispatcher=getFluxDispatcher();
+if(dispatcher){
+queueDispatch(dispatcher,{type:'RUNNING_GAMES_CHANGE',games:[],detectionEnabled:!!data.detectionEnabled});
+queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',socketId:'GameActivity',activity:null});
+queueDispatch(dispatcher,{type:'RPC_APP_DISCONNECTED',socketId:'GameActivity'});
+queueDispatch(dispatcher,{type:'LOCAL_ACTIVITY_UPDATE',activity:null});
+}
+if(document.getElementById(panelId))render(data);
+};
 window.__vcGameActivityApply=function(data){
 loading=false;
 if(!data)return;
 lastAppliedData=data;
 if(Date.now()>=pausePollUntil)render(data);
-loadDetectableApps().finally(function(){
 updateDetectedGamePresence(data);
+loadDetectableApps().finally(function(){
+if(lastAppliedData===data)updateDetectedGamePresence(data);
 });
 };
 window.__vcSetRPCActivity=function(payload){
@@ -924,11 +952,8 @@ return;
 mount();
 });
 setInterval(function(){
-if(active&&!loading&&isSettingsOpen()){
-var panel=document.getElementById(panelId);
-if(panel&&panel.style.display!=='none')position(panel);
-refresh();
-}
+if(active&&isSettingsOpen()){var panel=document.getElementById(panelId);if(panel&&panel.style.display!=='none')position(panel);}
+if(!loading&&Date.now()>=pausePollUntil)refresh();
 flushPendingPresence();
 },1000);
 function start(){
