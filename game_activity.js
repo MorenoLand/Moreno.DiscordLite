@@ -47,6 +47,7 @@ style.textContent=
 '#vc-game-activity-panel .vc-game-row-main{min-width:0!important;flex:1!important;}' +
 '#vc-game-activity-panel .vc-game-name{font-size:15px!important;font-weight:600!important;color:var(--header-primary,#f2f3f5)!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;}' +
 '#vc-game-activity-panel .vc-game-detail{font-size:13px!important;line-height:18px!important;color:var(--text-muted,#b5bac1)!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;}' +
+'#vc-game-activity-panel .vc-game-path{font-size:11px!important;line-height:15px!important;color:var(--text-muted,#949ba4)!important;overflow-wrap:anywhere!important;user-select:text!important;}' +
 '#vc-game-activity-panel .vc-switch{position:relative!important;display:inline-block!important;width:36px!important;height:20px!important;flex-shrink:0!important;cursor:pointer!important;}' +
 '#vc-game-activity-panel .vc-switch input{position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;margin:0!important;opacity:0!important;z-index:2!important;cursor:pointer!important;}' +
 '#vc-game-activity-panel .vc-slider{position:absolute!important;pointer-events:none!important;top:0!important;left:0!important;right:0!important;bottom:0!important;background-color:var(--background-modifier-accent,#4e5058)!important;transition:transform .15s ease-in-out,background-color .15s ease-in-out!important;border-radius:10px!important;z-index:1!important;}' +
@@ -182,7 +183,7 @@ node.dataset.vcAction=action;
 if(extra)node.className=extra;
 return node;
 }
-function row(name,detail,path,isEnabled,remove){
+function row(name,detail,path,isEnabled,remove,pid){
 var r=document.createElement('div');
 r.className='vc-game-row'+(isEnabled?'':' vc-disabled');
 var main=document.createElement('div');
@@ -193,8 +194,11 @@ title.textContent=name;
 var sub=document.createElement('div');
 sub.className='vc-game-detail';
 sub.textContent=detail||path;
-sub.title=path;
-main.append(title,sub);
+var exePath=document.createElement('div');
+exePath.className='vc-game-path';
+exePath.textContent=(pid?'PID '+pid+' • ':'')+(path||'');
+exePath.title=(path||'')+(pid?'\nPID '+pid:'');
+main.append(title,sub,exePath);
 r.append(main);
 var switchSpan=document.createElement('span');
 switchSpan.className='vc-switch';
@@ -301,7 +305,7 @@ inner.append(empty);
 }else{
 running.forEach(function(game){
 var isEnabled=!isGameDisabled(data.disabledGames,game.path);
-inner.append(row(resolveDisplayName(game.name,game.path,data.overrides),game.windowTitle,game.path,isEnabled,false));
+inner.append(row(resolveDisplayName(game.name,game.path,data.overrides),game.windowTitle,game.path,isEnabled,false,game.pid));
 });
 }
 
@@ -339,39 +343,12 @@ if(d&&typeof d.dispatch==='function')return d;
 }catch(e){}
 return null;
 }
-var KNOWN_GAMES={
-'wow.exe':{id:'356875762940379136',name:'World of Warcraft'},
-'wowclassic.exe':{id:'356875762940379136',name:'World of Warcraft'},
-'wowt.exe':{id:'356875762940379136',name:'World of Warcraft'},
-'wowb.exe':{id:'356875762940379136',name:'World of Warcraft'},
-'league of legends.exe':{id:'401518687463948290',name:'League of Legends'},
-'valorant.exe':{id:'700144211132645406',name:'VALORANT'},
-'overwatch.exe':{id:'356867200780468224',name:'Overwatch'},
-'csgo.exe':{id:'738864303494791248',name:'Counter-Strike 2'},
-'cs2.exe':{id:'738864303494791248',name:'Counter-Strike 2'},
-'dota2.exe':{id:'738864293411684352',name:'Dota 2'},
-'gta5.exe':{id:'436993026818867200',name:'Grand Theft Auto V'},
-'minecraft.exe':{id:'356875127150903296',name:'Minecraft'},
-'rocketleague.exe':{id:'356877028164632576',name:'Rocket League'},
-'fortniteclient-win64-shipping.exe':{id:'432980957394370572',name:'Fortnite'},
-'genshinimpact.exe':{id:'762434991303950386',name:'Genshin Impact'},
-'starrail.exe':{id:'1100344445853245480',name:'Honkai: Star Rail'},
-'ffxiv_dx11.exe':{id:'468936993781252096',name:'FINAL FANTASY XIV'},
-'r5apex.exe':{id:'542385150820417537',name:'Apex Legends'}
-};
 function resolveDisplayName(name,path,overrides){
-var id=path?path.toLowerCase():'';
-var raw=(overrides&&overrides[id])||name||'';
+var id=normId(path);
+var raw=(overrides&&overrides[id])||'';
 if(raw&&!/[\\\/]/.test(raw))return raw;
-var exe=(path||raw).replace(/^.*[\\\/]/,'').toLowerCase();
-if(exe==='javaw.exe'||exe==='java.exe'){
-if(raw&&/minecraft/i.test(raw))return 'Minecraft';
-return raw&&!/[\\\/]/.test(raw)?raw:exe.replace(/\.[^.]+$/,'');
-}
-var known=KNOWN_GAMES[exe];
-if(known&&known.name)return known.name;
-var app=detectableExes?detectableExes.get(exe):null;
-if(app&&app.name)return app.name;
+if(name&&!/[\\\/]/.test(name))return name;
+var exe=(path||raw).replace(/^.*[\\\/]/,'');
 return exe.replace(/\.[^.]+$/,'')||raw;
 }
 var dispatchQueue=[];
@@ -405,39 +382,6 @@ isProcessingQueue=false;
 if(dispatchQueue.length>0){
 setTimeout(processDispatchQueue,25);
 }
-}
-var detectableExes=null,detectablePromise=null;
-function loadDetectableApps(){
-if(detectableExes)return Promise.resolve(detectableExes);
-if(detectablePromise)return detectablePromise;
-detectablePromise=fetch('/api/v9/applications/detectable')
-.then(function(r){return r.ok?r.json():[];})
-.then(function(apps){
-var map=new Map();
-if(Array.isArray(apps)){
-for(var i=0;i<apps.length;i++){
-var app=apps[i];
-if(app&&app.executables){
-for(var j=0;j<app.executables.length;j++){
-var item=app.executables[j];
-if(item&&item.name){
-var parts=item.name.split('/');
-var exe=parts[parts.length-1].toLowerCase();
-if(!map.has(exe))map.set(exe,app);
-}
-}
-}
-}
-}
-detectableExes=map;
-return map;
-})
-.catch(function(err){
-console.warn('[DiscordLite] Failed to load detectable applications:',err);
-detectablePromise=null;
-return null;
-});
-return detectablePromise;
 }
 var activePresenceKey=null,activePresenceMeta=null,pendingPresenceData=null,lastAppliedData=null,presenceCleared=false,lastRunningSignature='';
 var pendingRPCActivities={};
@@ -487,10 +431,7 @@ return;
 }
 presenceCleared=false;
 var primary=activeGames[0];
-var exeName=primary.path?primary.path.replace(/^.*[\\\/]/,'').toLowerCase():'';
-var known=KNOWN_GAMES[exeName];
-var app=detectableExes?detectableExes.get(exeName):null;
-var appId=primary.applicationId||(app&&app.id)||(known&&known.id)||'';
+var appId=primary.applicationId||'';
 var gameName=resolveDisplayName(primary.name,primary.path,data.overrides);
 var presenceKey=primary.path+'|'+gameName+'|'+appId;
 if(activePresenceKey===presenceKey)return;
@@ -580,9 +521,6 @@ if(!data)return;
 lastAppliedData=data;
 if(Date.now()>=pausePollUntil)render(data);
 updateDetectedGamePresence(data);
-loadDetectableApps().finally(function(){
-if(lastAppliedData===data)updateDetectedGamePresence(data);
-});
 };
 window.__vcSetRPCActivity=function(payload){
 if(!payload||!payload.socketId)return;
@@ -964,10 +902,6 @@ lastAppliedData=window.__vcGameActivityInitial;
 render(window.__vcGameActivityInitial);
 updateDetectedGamePresence(window.__vcGameActivityInitial);
 }
-loadDetectableApps().finally(function(){
-var data=lastAppliedData||window.__vcGameActivityInitial;
-if(data)updateDetectedGamePresence(data);
-});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
 else start();

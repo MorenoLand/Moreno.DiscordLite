@@ -585,7 +585,6 @@ func main() {
 	})
 	discord.window = window
 	startDiscordRPCBridge(discord)
-	discord.startGameActivityObserver()
 	window.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(_ *application.WindowEvent) {
 		discord.injectPage(window)
 		discord.startGameActivityObserver()

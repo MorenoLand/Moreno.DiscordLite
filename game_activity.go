@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -24,125 +25,232 @@ type gameProcess struct {
 	ApplicationID string `json:"applicationId,omitempty"`
 }
 
-type knownGame struct {
+type detectableExecutable struct {
+	Name       string `json:"name"`
+	OS         string `json:"os"`
+	Arguments  string `json:"arguments"`
+	IsLauncher bool   `json:"isLauncher"`
+}
+
+type detectableApp struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Executables []detectableExecutable `json:"executables"`
+}
+
+type detectableExclusions struct {
+	Executables []string `json:"executables"`
+	Patterns    []string `json:"patterns"`
+}
+
+type gameCandidate struct {
 	ApplicationID string
 	Name          string
+	Executable    string
+	Arguments     string
 }
 
-var defaultKnownGames = map[string]knownGame{
-	"wow.exe":                           {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
-	"wowclassic.exe":                    {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
-	"wowt.exe":                          {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
-	"wowb.exe":                          {ApplicationID: "356875762940379136", Name: "World of Warcraft"},
-	"league of legends.exe":             {ApplicationID: "401518687463948290", Name: "League of Legends"},
-	"valorant.exe":                      {ApplicationID: "700144211132645406", Name: "VALORANT"},
-	"overwatch.exe":                     {ApplicationID: "356867200780468224", Name: "Overwatch"},
-	"csgo.exe":                          {ApplicationID: "738864303494791248", Name: "Counter-Strike 2"},
-	"cs2.exe":                           {ApplicationID: "738864303494791248", Name: "Counter-Strike 2"},
-	"dota2.exe":                         {ApplicationID: "738864293411684352", Name: "Dota 2"},
-	"gta5.exe":                          {ApplicationID: "436993026818867200", Name: "Grand Theft Auto V"},
-	"minecraft.exe":                     {ApplicationID: "356875127150903296", Name: "Minecraft"},
-	"rocketleague.exe":                  {ApplicationID: "356877028164632576", Name: "Rocket League"},
-	"fortniteclient-win64-shipping.exe": {ApplicationID: "432980957394370572", Name: "Fortnite"},
-	"genshinimpact.exe":                 {ApplicationID: "762434991303950386", Name: "Genshin Impact"},
-	"starrail.exe":                      {ApplicationID: "1100344445853245480", Name: "Honkai: Star Rail"},
-	"ffxiv_dx11.exe":                    {ApplicationID: "468936993781252096", Name: "FINAL FANTASY XIV"},
-	"r5apex.exe":                        {ApplicationID: "542385150820417537", Name: "Apex Legends"},
-}
+type gameCandidateIndex map[string][]gameCandidate
 
 var (
-	cachedDetectableMu sync.RWMutex
-	cachedDetectable   map[string]knownGame
+	cachedDetectableMu       sync.RWMutex
+	cachedDetectableApps     []detectableApp
+	cachedCandidateIndex     gameCandidateIndex
+	cachedNonGameIDs         map[string]bool
+	cachedBlockedExecutables map[string]bool
+	cachedBlockedPatterns    []*regexp.Regexp
+	detectableCatalogReady   bool
 )
 
-func resolveKnownGame(exeName string) (knownGame, bool) {
-	lower := strings.ToLower(exeName)
-	if filepath.Ext(lower) == "" {
-		lower += ".exe"
-	}
-	cachedDetectableMu.RLock()
-	if cachedDetectable != nil {
-		if game, ok := cachedDetectable[lower]; ok {
-			cachedDetectableMu.RUnlock()
-			return game, true
-		}
-	}
-	cachedDetectableMu.RUnlock()
-	if game, ok := defaultKnownGames[lower]; ok {
-		return game, true
-	}
-	return knownGame{}, false
-}
-
-func initDetectableCache() {
-	go func() {
-		cachePath, err := detectableCachePath()
-		if err == nil {
-			if data, err := os.ReadFile(cachePath); err == nil {
-				parseAndSetDetectable(data)
-			}
-		}
-		needFetch := true
-		if info, err := os.Stat(cachePath); err == nil {
-			if time.Since(info.ModTime()) < 7*24*time.Hour {
-				needFetch = false
-			}
-		}
-		if needFetch {
-			client := &http.Client{Timeout: 15 * time.Second}
-			resp, err := client.Get("https://discord.com/api/v9/applications/detectable")
-			if err == nil && resp.StatusCode == http.StatusOK {
-				body, err := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if err == nil && len(body) > 0 {
-					if parseAndSetDetectable(body) {
-						_ = os.WriteFile(cachePath, body, 0644)
-					}
-				}
-			}
-		}
-	}()
-}
-
-func detectableCachePath() (string, error) {
+func detectableCachePath(name string) (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	dir := filepath.Join(configDir, "Moreno", "DiscordLite")
 	_ = os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "detectable.json"), nil
+	return filepath.Join(dir, name), nil
 }
 
-type detectableApp struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Executables []struct {
-		Name string `json:"name"`
-		OS   string `json:"os"`
-	} `json:"executables"`
+func initDetectableCache() {
+	go func() {
+		client := &http.Client{Timeout: 20 * time.Second}
+		resources := []struct {
+			name string
+			urls []string
+			set  func([]byte) bool
+		}{
+			{"detectable-games-v1.json", []string{"https://cdn.discordapp.com/detectables/games-v1.json", "https://discord.com/api/v9/applications/detectable"}, parseAndSetDetectable},
+			{"detectable-non-games-v1.json", []string{"https://cdn.discordapp.com/detectables/non-games-v1.json", "https://discord.com/api/v9/applications/non-games/detectable"}, parseAndSetNonGames},
+			{"detectable-exclusions.json", []string{"https://discord.com/api/v9/games/detectable/exclusions"}, parseAndSetDetectableExclusions},
+		}
+		for _, resource := range resources {
+			cachePath, err := detectableCachePath(resource.name)
+			if err != nil {
+				continue
+			}
+			if data, err := os.ReadFile(cachePath); err == nil {
+				resource.set(data)
+			}
+			info, err := os.Stat(cachePath)
+			if err == nil && time.Since(info.ModTime()) < 24*time.Hour {
+				continue
+			}
+			for _, url := range resource.urls {
+				resp, err := client.Get(url)
+				if err != nil {
+					continue
+				}
+				body, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK && readErr == nil && len(body) > 0 && resource.set(body) {
+					_ = os.WriteFile(cachePath, body, 0600)
+					break
+				}
+			}
+		}
+	}()
 }
 
 func parseAndSetDetectable(data []byte) bool {
 	var apps []detectableApp
-	if err := json.Unmarshal(data, &apps); err != nil {
+	if err := json.Unmarshal(data, &apps); err != nil || len(apps) == 0 {
 		return false
 	}
-	m := make(map[string]knownGame, len(apps)*2)
+	cachedDetectableMu.Lock()
+	cachedDetectableApps = apps
+	detectableCatalogReady = true
+	rebuildCachedCandidateIndex()
+	cachedDetectableMu.Unlock()
+	return true
+}
+
+func parseAndSetNonGames(data []byte) bool {
+	var apps []detectableApp
+	if err := json.Unmarshal(data, &apps); err != nil || len(apps) == 0 {
+		return false
+	}
+	ids := make(map[string]bool, len(apps))
 	for _, app := range apps {
-		for _, exe := range app.Executables {
-			if exe.OS == "win32" || exe.OS == "" {
-				base := strings.ToLower(filepath.Base(strings.ReplaceAll(exe.Name, "/", "\\")))
-				if base != "" {
-					m[base] = knownGame{ApplicationID: app.ID, Name: app.Name}
-				}
-			}
+		if app.ID != "" {
+			ids[app.ID] = true
 		}
 	}
 	cachedDetectableMu.Lock()
-	cachedDetectable = m
+	cachedNonGameIDs = ids
+	rebuildCachedCandidateIndex()
 	cachedDetectableMu.Unlock()
 	return true
+}
+
+func parseAndSetDetectableExclusions(data []byte) bool {
+	var exclusions detectableExclusions
+	if err := json.Unmarshal(data, &exclusions); err != nil || len(exclusions.Executables)+len(exclusions.Patterns) == 0 {
+		return false
+	}
+	executables := make(map[string]bool, len(exclusions.Executables))
+	for _, executable := range exclusions.Executables {
+		executables[normalizeCandidateExecutable(executable)] = true
+	}
+	patterns := make([]*regexp.Regexp, 0, len(exclusions.Patterns))
+	for _, pattern := range exclusions.Patterns {
+		if compiled, err := regexp.Compile("(?i)" + pattern); err == nil {
+			patterns = append(patterns, compiled)
+		}
+	}
+	cachedDetectableMu.Lock()
+	cachedBlockedExecutables = executables
+	cachedBlockedPatterns = patterns
+	cachedDetectableMu.Unlock()
+	return true
+}
+
+func rebuildCachedCandidateIndex() {
+	candidates := make(gameCandidateIndex)
+	for _, app := range cachedDetectableApps {
+		if cachedNonGameIDs[app.ID] {
+			continue
+		}
+		for _, executable := range app.Executables {
+			if (strings.EqualFold(executable.OS, "win32") || executable.OS == "") && executable.Name != "" {
+				candidate := gameCandidate{ApplicationID: app.ID, Name: app.Name, Executable: executable.Name, Arguments: executable.Arguments}
+				name := filepath.Base(normalizeCandidateExecutable(executable.Name))
+				candidates[name] = append(candidates[name], candidate)
+			}
+		}
+	}
+	cachedCandidateIndex = candidates
+}
+
+func cachedGameCandidates() gameCandidateIndex {
+	cachedDetectableMu.RLock()
+	defer cachedDetectableMu.RUnlock()
+	return cachedCandidateIndex
+}
+
+func executableMatchesPath(pathName, executable string) bool {
+	pathName = normalizeGamePath(pathName)
+	executable = normalizeCandidateExecutable(executable)
+	if pathName == "" || executable == "" {
+		return false
+	}
+	if strings.Contains(executable, `\`) {
+		return pathName == executable || strings.HasSuffix(pathName, `\`+executable)
+	}
+	return strings.EqualFold(filepath.Base(pathName), executable)
+}
+
+func normalizeCandidateExecutable(value string) string {
+	value = strings.TrimSpace(strings.TrimPrefix(value, ">"))
+	value = strings.ReplaceAll(value, "/", `\`)
+	value = strings.TrimLeft(value, `\`)
+	return strings.ToLower(value)
+}
+
+func candidateIsAllowed(candidate gameCandidate, pathName string) bool {
+	cachedDetectableMu.RLock()
+	defer cachedDetectableMu.RUnlock()
+	if cachedNonGameIDs[candidate.ApplicationID] {
+		return false
+	}
+	name := normalizeCandidateExecutable(candidate.Executable)
+	path := normalizeGamePath(pathName)
+	if cachedBlockedExecutables[name] || cachedBlockedExecutables[path] || cachedBlockedExecutables[strings.ToLower(filepath.Base(path))] {
+		return false
+	}
+	for _, pattern := range cachedBlockedPatterns {
+		if pattern.MatchString(path) || pattern.MatchString(filepath.Base(path)) || pattern.MatchString(name) {
+			return false
+		}
+	}
+	return true
+}
+
+func catalogContainsPath(pathName string, candidates gameCandidateIndex) bool {
+	for _, candidate := range candidates[strings.ToLower(filepath.Base(normalizeGamePath(pathName)))] {
+		if executableMatchesPath(pathName, candidate.Executable) && candidateIsAllowed(candidate, pathName) {
+			return true
+		}
+	}
+	return false
+}
+
+func gameActivityCandidates(config gameActivityConfig) (gameCandidateIndex, map[string]string) {
+	manual := make(map[string]string)
+	for _, entry := range config.GamesSeen {
+		id := normalizeGamePath(entry.Path)
+		if id == "" || config.IgnoredGames[id] {
+			continue
+		}
+		if entry.Source == "manual" || config.Overrides[id] != "" {
+			name := config.Overrides[id]
+			if name == "" {
+				name = entry.Name
+			}
+			manual[id] = name
+		}
+	}
+	return cachedGameCandidates(), manual
 }
 
 type gameActivityEntry struct {
@@ -242,20 +350,8 @@ func refreshGameActivityProcesses() []gameProcess {
 		setCachedGameActivityProcesses(nil)
 		return nil
 	}
-	candidates := make([]string, 0, len(config.GamesSeen))
-	for _, entry := range config.GamesSeen {
-		entryID := normalizeGamePath(entry.Path)
-		if config.IgnoredGames != nil && config.IgnoredGames[entryID] {
-			continue
-		}
-		if ignoredGameProcess(filepath.Base(entry.Path)) {
-			continue
-		}
-		if entry.Source == "manual" || config.Overrides[entryID] != "" || likelyGamePath(entry.Path) {
-			candidates = append(candidates, entry.Path)
-		}
-	}
-	running, err := enumerateGameProcesses(candidates...)
+	candidates, manual := gameActivityCandidates(config)
+	running, err := enumerateGameProcesses(candidates, manual)
 	if err != nil {
 		setCachedGameActivityProcesses(nil)
 		return nil
@@ -276,6 +372,21 @@ func refreshGameActivityProcesses() []gameProcess {
 		return running
 	}
 	changed := false
+	cachedDetectableMu.RLock()
+	catalogReady := detectableCatalogReady
+	cachedDetectableMu.RUnlock()
+	if catalogReady {
+		kept := config.GamesSeen[:0]
+		for _, entry := range config.GamesSeen {
+			id := normalizeGamePath(entry.Path)
+			if entry.Source == "detected" && config.Overrides[id] == "" && !catalogContainsPath(entry.Path, candidates) {
+				changed = true
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		config.GamesSeen = kept
+	}
 	for _, process := range running {
 		id := normalizeGamePath(process.Path)
 		if id == "" || (config.IgnoredGames != nil && config.IgnoredGames[id]) {
@@ -368,15 +479,6 @@ func loadGameActivityConfig() (gameActivityConfig, error) {
 			needsSave = true
 			continue
 		}
-		exe := strings.ToLower(filepath.Base(entry.Path))
-		if ignoredGameProcess(exe) {
-			needsSave = true
-			continue
-		}
-		if (exe == "javaw.exe" || exe == "java.exe") && entry.Name == "Minecraft" && entry.Source == "detected" {
-			needsSave = true
-			continue
-		}
 		if strings.ContainsAny(entry.Name, `\/`) {
 			entry.Name = gameDisplayName(entry.Name)
 			needsSave = true
@@ -421,28 +523,12 @@ func gameDisplayName(value string) string {
 		return ""
 	}
 	base := filepath.Base(name)
-	if known, ok := resolveKnownGame(base); ok && known.Name != "" {
-		return known.Name
-	}
 	clean := strings.TrimSuffix(base, filepath.Ext(base))
 	if clean == "" {
 		return base
 	}
 	return clean
 }
-
-func ignoredGameProcess(name string) bool {
-	lower := strings.ToLower(name)
-	switch lower {
-	case "discord.exe", "discordcanary.exe", "discordptb.exe", "msedgewebview2.exe", "crashpad_handler.exe", "explorer.exe", "dwm.exe", "applicationframehost.exe", "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe", "textinputhost.exe", "taskmgr.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "conhost.exe", "git.exe", "gh.exe", "node.exe", "go.exe", "python.exe", "bash.exe", "sh.exe", "wt.exe", "wsl.exe", "wslhost.exe":
-		return true
-	}
-	if strings.Contains(lower, "crashhandler") || strings.Contains(lower, "crashreporter") || strings.Contains(lower, "crashpad") || strings.Contains(lower, "crashmailer") || strings.Contains(lower, "werfault") || strings.Contains(lower, "errorreport") || strings.HasPrefix(lower, "unins") || strings.Contains(lower, "setup") || strings.Contains(lower, "installer") {
-		return true
-	}
-	return false
-}
-
 func (d *discordApp) gameActivityState() (gameActivityState, error) {
 	refreshGameActivityProcesses()
 	gameActivityMu.Lock()
@@ -485,14 +571,15 @@ func containsGameEntry(entries []gameActivityEntry, id string) bool {
 
 func (d *discordApp) addGameActivity(window application.Window, args bridgeGameActivityAddArgs) (gameActivityState, error) {
 	gameActivityMu.Lock()
-	defer gameActivityMu.Unlock()
 	pathName := strings.TrimSpace(args.Path)
 	if pathName == "" {
 		if d.app == nil {
+			gameActivityMu.Unlock()
 			return gameActivityState{}, fmt.Errorf("application is not ready")
 		}
 		selected, err := d.app.Dialog.OpenFile().SetTitle("Add a registered game").SetMessage("Select the game's executable").CanChooseFiles(true).CanChooseDirectories(false).AddFilter("Windows executables", "*.exe").AllowsOtherFileTypes(false).AttachToWindow(window).PromptForSingleSelection()
 		if err != nil {
+			gameActivityMu.Unlock()
 			return gameActivityState{}, err
 		}
 		pathName = selected
@@ -500,13 +587,16 @@ func (d *discordApp) addGameActivity(window application.Window, args bridgeGameA
 	pathName = strings.Trim(strings.TrimSpace(pathName), "\"")
 	info, err := os.Stat(pathName)
 	if err != nil {
+		gameActivityMu.Unlock()
 		return gameActivityState{}, err
 	}
 	if info.IsDir() || !strings.EqualFold(filepath.Ext(pathName), ".exe") {
+		gameActivityMu.Unlock()
 		return gameActivityState{}, fmt.Errorf("select a Windows executable")
 	}
 	config, err := loadGameActivityConfig()
 	if err != nil {
+		gameActivityMu.Unlock()
 		return gameActivityState{}, err
 	}
 	id := normalizeGamePath(pathName)
@@ -532,9 +622,17 @@ func (d *discordApp) addGameActivity(window application.Window, args bridgeGameA
 	}
 	config.GamesSeen = deduplicateGameEntries(config.GamesSeen, config.Overrides)
 	if err := saveGameActivityConfig(config); err != nil {
+		gameActivityMu.Unlock()
 		return gameActivityState{}, err
 	}
+	gameActivityMu.Unlock()
 	refreshGameActivityProcesses()
+	gameActivityMu.Lock()
+	defer gameActivityMu.Unlock()
+	config, err = loadGameActivityConfig()
+	if err != nil {
+		return gameActivityState{}, err
+	}
 	return d.gameActivityStateUnlocked(config)
 }
 
@@ -622,13 +720,8 @@ func (d *discordApp) setGameActivityDetection(enabled bool) (gameActivityState, 
 		return gameActivityState{}, err
 	}
 	if enabled {
-		candidates := make([]string, 0, len(config.GamesSeen))
-		for _, entry := range config.GamesSeen {
-			if entry.Source == "manual" || config.Overrides[normalizeGamePath(entry.Path)] != "" || likelyGamePath(entry.Path) {
-				candidates = append(candidates, entry.Path)
-			}
-		}
-		if running, err := enumerateGameProcesses(candidates...); err == nil {
+		candidates, manual := gameActivityCandidates(config)
+		if running, err := enumerateGameProcesses(candidates, manual); err == nil {
 			setCachedGameActivityProcesses(running)
 		}
 	}
