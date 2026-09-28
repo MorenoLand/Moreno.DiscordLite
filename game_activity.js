@@ -891,7 +891,7 @@ mount();
 });
 setInterval(function(){
 if(active&&isSettingsOpen()){var panel=document.getElementById(panelId);if(panel&&panel.style.display!=='none')position(panel);}
-if(!loading&&Date.now()>=pausePollUntil)refresh();
+if(active&&isSettingsOpen()&&!loading&&Date.now()>=pausePollUntil)refresh();
 flushPendingPresence();
 },1000);
 function start(){

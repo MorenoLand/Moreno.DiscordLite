@@ -61,19 +61,41 @@ type bridgeURLArgs struct {
 }
 
 type discordApp struct {
-	app              *application.App
-	window           *application.WebviewWindow
-	recentMu         sync.Mutex
-	recentDownload   map[string]time.Time
-	gameActivityOnce sync.Once
+	app                   *application.App
+	window                *application.WebviewWindow
+	recentMu              sync.Mutex
+	recentDownload        map[string]time.Time
+	gameActivityOnce      sync.Once
+	memoryTargetErrorOnce sync.Once
 }
 
-func showMainWindow(window application.Window) {
-	window.UnMinimise()
-	window.Show()
-	window.SetAlwaysOnTop(true)
-	window.Focus()
-	window.SetAlwaysOnTop(false)
+func (d *discordApp) setWebViewMemoryUsageTargetLevel(level application.MemoryUsageTargetLevel) {
+	if d.window == nil {
+		return
+	}
+	if err := d.window.SetMemoryUsageTargetLevel(level); err != nil {
+		d.memoryTargetErrorOnce.Do(func() { log.Printf("WebView2 memory target unavailable: %v", err) })
+	}
+}
+
+func (d *discordApp) showMainWindow() {
+	if d.window == nil {
+		return
+	}
+	d.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelNormal)
+	d.window.UnMinimise()
+	d.window.Show()
+	d.window.SetAlwaysOnTop(true)
+	d.window.Focus()
+	d.window.SetAlwaysOnTop(false)
+}
+
+func (d *discordApp) hideMainWindow() {
+	if d.window == nil {
+		return
+	}
+	d.window.Hide()
+	d.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelLow)
 }
 
 func (d *discordApp) handleMessage(window application.Window, message string, _ *application.OriginInfo) {
@@ -93,7 +115,7 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 		}
 		d.respond(window, request.ID, nil, nil)
 	case "vc_hide":
-		window.Hide()
+		d.hideMainWindow()
 		d.respond(window, request.ID, nil, nil)
 	case "vc_open_devtools":
 		window.OpenDevTools()
@@ -585,6 +607,18 @@ func main() {
 	})
 	discord.window = window
 	startDiscordRPCBridge(discord)
+	window.OnWindowEvent(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
+		discord.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelLow)
+	})
+	window.OnWindowEvent(events.Common.WindowFocus, func(_ *application.WindowEvent) {
+		discord.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelNormal)
+	})
+	window.OnWindowEvent(events.Common.WindowMinimise, func(_ *application.WindowEvent) {
+		discord.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelLow)
+	})
+	window.OnWindowEvent(events.Common.WindowUnMinimise, func(_ *application.WindowEvent) {
+		discord.setWebViewMemoryUsageTargetLevel(application.MemoryUsageTargetLevelNormal)
+	})
 	window.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(_ *application.WindowEvent) {
 		discord.injectPage(window)
 		discord.startGameActivityObserver()
@@ -594,15 +628,15 @@ func main() {
 	tray.SetIcon(icon)
 	tray.SetTooltip("Discord")
 	menu := application.NewMenu()
-	menu.Add("Show").OnClick(func(*application.Context) { showMainWindow(window) })
-	menu.Add("Hide").OnClick(func(*application.Context) { window.Hide() })
+	menu.Add("Show").OnClick(func(*application.Context) { discord.showMainWindow() })
+	menu.Add("Hide").OnClick(func(*application.Context) { discord.hideMainWindow() })
 	menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 	tray.SetMenu(menu)
 	tray.OnClick(func() {
 		if window.IsVisible() {
-			window.Hide()
+			discord.hideMainWindow()
 		} else {
-			showMainWindow(window)
+			discord.showMainWindow()
 		}
 	})
 	tray.OnRightClick(func() { tray.OpenMenu() })

@@ -1,0 +1,76 @@
+# github.com/adrg/xdg v0.5.3
+## explicit; go 1.19
+github.com/adrg/xdg
+github.com/adrg/xdg/internal/pathutil
+github.com/adrg/xdg/internal/userdirs
+# github.com/coder/websocket v1.8.14
+## explicit; go 1.23
+github.com/coder/websocket
+github.com/coder/websocket/internal/bpool
+github.com/coder/websocket/internal/errd
+github.com/coder/websocket/internal/util
+github.com/coder/websocket/internal/wsjs
+github.com/coder/websocket/wsjson
+# github.com/go-ole/go-ole v1.3.0
+## explicit; go 1.12
+github.com/go-ole/go-ole
+# github.com/godbus/dbus/v5 v5.2.2
+## explicit; go 1.20
+github.com/godbus/dbus/v5
+github.com/godbus/dbus/v5/introspect
+github.com/godbus/dbus/v5/prop
+# github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1
+## explicit; go 1.14
+github.com/jchv/go-winloader
+github.com/jchv/go-winloader/internal/loader
+github.com/jchv/go-winloader/internal/memloader
+github.com/jchv/go-winloader/internal/pe
+github.com/jchv/go-winloader/internal/vmem
+github.com/jchv/go-winloader/internal/winloader
+# github.com/mattn/go-colorable v0.1.14
+## explicit; go 1.18
+github.com/mattn/go-colorable
+# github.com/mattn/go-isatty v0.0.20
+## explicit; go 1.15
+github.com/mattn/go-isatty
+# github.com/wailsapp/wails/v3 v3.0.0-beta.11
+## explicit; go 1.25.0
+github.com/wailsapp/wails/v3/internal/assetserver
+github.com/wailsapp/wails/v3/internal/assetserver/bundledassets
+github.com/wailsapp/wails/v3/internal/assetserver/webview
+github.com/wailsapp/wails/v3/internal/browser
+github.com/wailsapp/wails/v3/internal/capabilities
+github.com/wailsapp/wails/v3/internal/dbus/menu
+github.com/wailsapp/wails/v3/internal/dbus/notifier
+github.com/wailsapp/wails/v3/internal/debounce
+github.com/wailsapp/wails/v3/internal/debug
+github.com/wailsapp/wails/v3/internal/fileexplorer
+github.com/wailsapp/wails/v3/internal/git
+github.com/wailsapp/wails/v3/internal/go-common-file-dialog/cfd
+github.com/wailsapp/wails/v3/internal/hash
+github.com/wailsapp/wails/v3/internal/lo
+github.com/wailsapp/wails/v3/internal/mailbox
+github.com/wailsapp/wails/v3/internal/operatingsystem
+github.com/wailsapp/wails/v3/internal/optional
+github.com/wailsapp/wails/v3/internal/runtime
+github.com/wailsapp/wails/v3/internal/signal
+github.com/wailsapp/wails/v3/internal/sliceutil
+github.com/wailsapp/wails/v3/internal/tint
+github.com/wailsapp/wails/v3/internal/uuid
+github.com/wailsapp/wails/v3/internal/version
+github.com/wailsapp/wails/v3/internal/webview2/internal/w32
+github.com/wailsapp/wails/v3/internal/webview2/pkg/combridge
+github.com/wailsapp/wails/v3/internal/webview2/pkg/edge
+github.com/wailsapp/wails/v3/internal/webview2/webviewloader
+github.com/wailsapp/wails/v3/pkg/application
+github.com/wailsapp/wails/v3/pkg/errs
+github.com/wailsapp/wails/v3/pkg/events
+github.com/wailsapp/wails/v3/pkg/icons
+github.com/wailsapp/wails/v3/pkg/mac
+github.com/wailsapp/wails/v3/pkg/updater
+github.com/wailsapp/wails/v3/pkg/w32
+# golang.org/x/sys v0.46.0
+## explicit; go 1.25.0
+golang.org/x/sys/unix
+golang.org/x/sys/windows
+golang.org/x/sys/windows/registry
