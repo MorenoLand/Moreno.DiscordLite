@@ -2,21 +2,22 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Build all platforms or Windows only
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - windows-only
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            artifact: discord-windows
-            path: bin/discord.exe
-          - os: ubuntu-latest
-            artifact: discord-linux
-            path: bin/discord
-          - os: macos-latest
-            artifact: discord-macos
-            path: bin/discord
+        include: ${{ inputs.platform == 'windows-only' && fromJSON('[{"os":"windows-latest","artifact":"discord-windows","path":"bin/discord.exe"}]') || fromJSON('[{"os":"windows-latest","artifact":"discord-windows","path":"bin/discord.exe"},{"os":"ubuntu-latest","artifact":"discord-linux","path":"bin/discord"},{"os":"macos-latest","artifact":"discord-macos","path":"bin/discord"}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
