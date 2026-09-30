@@ -1,4 +1,4 @@
-# Moreno.DiscordLite
+# Unofficial Discord desktop wrapper
 
 An unofficial Discord desktop wrapper built with Wails 3. It loads Discord at `https://discord.com/app`, injects the bundled Vencord browser build, provides the custom frameless title bar and tray controls, and exposes the local Discord RPC pipe on Windows.
 
