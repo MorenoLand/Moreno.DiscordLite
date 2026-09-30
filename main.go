@@ -32,12 +32,6 @@ var assets embed.FS
 //go:embed discord.ico
 var icon []byte
 
-//go:embed vencord/browser.js
-var embeddedVencordJS string
-
-//go:embed vencord/browser.css
-var embeddedVencordCSS string
-
 //go:embed game_activity.js
 var embeddedGameActivityJS string
 
@@ -139,7 +133,7 @@ func (d *discordApp) handleMessage(window application.Window, message string, _ 
 		}
 		d.respond(window, request.ID, nil, openURL(args.URL))
 	case "vc_reload_vencord":
-		css, _ := readVencordFile("browser.css", embeddedVencordCSS)
+		css, _ := readVencordFile("browser.css")
 		encoded, _ := json.Marshal(css)
 		window.ExecJS(fmt.Sprintf("var s=document.getElementById('vencord-css');if(s)s.textContent=%s;else{s=document.createElement('style');s.id='vencord-css';s.textContent=%s;document.head.appendChild(s)}location.reload();", encoded, encoded))
 		d.respond(window, request.ID, nil, nil)
@@ -313,14 +307,14 @@ func openURL(rawURL string) error {
 	return command.Start()
 }
 
-func readVencordFile(name, fallback string) (string, error) {
+func readVencordFile(name string) (string, error) {
 	directory, err := vencordCacheDir()
 	if err != nil {
-		return fallback, err
+		return "", err
 	}
 	data, err := os.ReadFile(filepath.Join(directory, name))
 	if err != nil {
-		return fallback, err
+		return "", err
 	}
 	return string(data), nil
 }
@@ -518,8 +512,8 @@ document.addEventListener('contextmenu',function(e){var img=e.target&&e.target.c
 })();`
 
 func (d *discordApp) injectPage(window *application.WebviewWindow) {
-	vencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
-	vencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
+	vencordJS, _ := readVencordFile("browser.js")
+	vencordCSS, _ := readVencordFile("browser.css")
 	initialGameActivity, _ := d.gameActivityState()
 	encodedGameActivity, _ := json.Marshal(initialGameActivity)
 	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"
@@ -577,8 +571,8 @@ func main() {
 		},
 	})
 	discord.app = app
-	initialVencordJS, _ := readVencordFile("browser.js", embeddedVencordJS)
-	initialVencordCSS, _ := readVencordFile("browser.css", embeddedVencordCSS)
+	initialVencordJS, _ := readVencordFile("browser.js")
+	initialVencordCSS, _ := readVencordFile("browser.css")
 	initialGameActivity, _ := discord.gameActivityState()
 	encodedGameActivity, _ := json.Marshal(initialGameActivity)
 	initialGameActivityJS := "window.__vcGameActivityInitial=" + string(encodedGameActivity) + ";"

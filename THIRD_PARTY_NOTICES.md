@@ -2,17 +2,17 @@
 
 ## Vendicated/Vencord
 
-This repository contains the following Vencord browser artifacts:
+The application downloads these Vencord browser artifacts at runtime and caches them outside the repository:
 
-- `vencord/browser.js`
-- `vencord/browser.css`
+- `browser.js`
+- `browser.css`
 
-They are refreshed from the Vencord devbuild endpoints used by `main.go`:
+The devbuild endpoints used by `main.go` are:
 
 - <https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.js>
 - <https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.css>
 
-Vencord is distributed by its upstream project under the GNU General Public License, version 3. Review the upstream [Vencord license](https://github.com/Vendicated/Vencord/blob/main/LICENSE) for the applicable terms. This repository's MIT license does not relicense these artifacts.
+Vencord is distributed by its upstream project under the GNU General Public License, version 3. Review the upstream [Vencord license](https://github.com/Vendicated/Vencord/blob/main/LICENSE) for the applicable terms. This repository's MIT license does not relicense these runtime downloads.
 
 ## Wails and Go dependencies
 

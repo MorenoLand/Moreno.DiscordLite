@@ -33,7 +33,7 @@ On Windows, verify the packaged executable with `upx -t bin/discord.exe` when th
 
 - Keep changes focused and preserve the existing Discord, Vencord, RPC, tray, download, and title-bar behavior unless the change explicitly targets one of them.
 - Put application logic in source files and build configuration, not generated output. Do not commit `bin/`, `*.syso`, `frontend/dist/`, or dependency directories.
-- Review changes to `vencord/browser.js` and `vencord/browser.css`; they can be refreshed by running the application and remain third-party assets.
+- Review changes to the Vencord download and cache flow; upstream browser assets are fetched at runtime and are not checked in.
 - Do not commit Discord tokens, cookies, RPC payloads, credentials, private URLs, signing keys, or machine-specific paths.
 - For UI or injection changes, include the affected route/state and a screenshot or DevTools observation when it helps reviewers reproduce the behavior.
 - Update the relevant documentation when build, runtime, security, or contribution behavior changes.

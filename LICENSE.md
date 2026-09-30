@@ -8,4 +8,4 @@ This project license applies only to material authored for this repository. It d
 
 ## Third-party material
 
-The browser assets under `vencord/` originate from Vendicated/Vencord and are distributed under the upstream Vencord license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the asset paths and source links.
+The application downloads Vencord browser assets from Vendicated/Vencord at runtime; those assets retain the upstream Vencord license and are not included in this repository. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for source links.
